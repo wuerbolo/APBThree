@@ -8,6 +8,11 @@ const renderer = new THREE.WebGLRenderer();
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
+// Camera mode settings
+let cameraMode = 'firstPerson'; // 'firstPerson' or 'topDown'
+const TOPDOWN_HEIGHT = 50;
+const TOPDOWN_ANGLE = -Math.PI / 4; // 45 degrees
+
 // Mouse look controls
 let isPointerLocked = false;
 let yaw = 0;
@@ -16,7 +21,7 @@ const mouseSensitivity = 0.002;
 
 // Request pointer lock on click
 renderer.domElement.addEventListener('click', () => {
-  if (!isPointerLocked) {
+  if (!isPointerLocked && cameraMode === 'firstPerson') {
     renderer.domElement.requestPointerLock();
   }
 });
@@ -28,10 +33,22 @@ document.addEventListener('pointerlockchange', () => {
 
 // Mouse movement handler
 document.addEventListener('mousemove', (event) => {
-  if (isPointerLocked) {
+  if (isPointerLocked && cameraMode === 'firstPerson') {
     yaw -= event.movementX * mouseSensitivity;
     pitch -= event.movementY * mouseSensitivity;
     pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch)); // Clamp pitch
+  }
+});
+
+// Camera mode toggle
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'v' || event.key === 'V') {
+    cameraMode = cameraMode === 'firstPerson' ? 'topDown' : 'firstPerson';
+    
+    // If switching to top-down, exit pointer lock
+    if (cameraMode === 'topDown' && document.pointerLockElement) {
+      document.exitPointerLock();
+    }
   }
 });
 
@@ -44,15 +61,21 @@ const PROJECTILE_LIFETIME = 3000; // 3 seconds
 
 // Handle shooting
 document.addEventListener('mousedown', (event) => {
-  if (event.button === 0 && isPointerLocked) { // Left click only
+  if (event.button === 0) { // Left click only
     const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
+    let direction;
     
-    // Set initial position slightly in front of the camera
-    const direction = new THREE.Vector3(0, 0, -1);
-    direction.applyQuaternion(camera.quaternion);
-    projectile.position.copy(camera.position).add(direction.multiplyScalar(2));
+    if (cameraMode === 'firstPerson') {
+      // First-person: shoot where you're looking
+      direction = new THREE.Vector3(0, 0, -1);
+      direction.applyQuaternion(camera.quaternion);
+    } else {
+      // Top-down: shoot forward relative to screen
+      direction = new THREE.Vector3(0, -0.5, -1);
+      direction.normalize();
+    }
     
-    // Store direction for movement
+    projectile.position.copy(localPlayer.position).add(new THREE.Vector3(0, 1.5, 0));
     projectile.direction = direction;
     projectile.createdAt = Date.now();
     
@@ -212,32 +235,49 @@ const MOVE_SPEED = 0.5;
 function animate() {
   requestAnimationFrame(animate);
 
-  // Update camera rotation
-  camera.rotation.order = 'YXZ';
-  camera.rotation.y = yaw;
-  camera.rotation.x = pitch;
-
-  // Handle movement relative to camera direction
+  // Handle movement based on camera mode
   const moveDistance = MOVE_SPEED;
-  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-  forward.y = 0; // Keep movement horizontal
-  forward.normalize();
-  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-  right.y = 0;
-  right.normalize();
 
-  if (keys.w || keys.ArrowUp) localPlayer.position.add(forward.multiplyScalar(moveDistance));
-  if (keys.s || keys.ArrowDown) localPlayer.position.add(forward.multiplyScalar(-moveDistance));
-  if (keys.d || keys.ArrowRight) localPlayer.position.add(right.multiplyScalar(moveDistance));
-  if (keys.a || keys.ArrowLeft) localPlayer.position.add(right.multiplyScalar(-moveDistance));
+  if (cameraMode === 'firstPerson') {
+    // First-person movement
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = yaw;
+    camera.rotation.x = pitch;
+
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    forward.y = 0;
+    forward.normalize();
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    right.y = 0;
+    right.normalize();
+
+    if (keys.w || keys.ArrowUp) localPlayer.position.add(forward.multiplyScalar(moveDistance));
+    if (keys.s || keys.ArrowDown) localPlayer.position.add(forward.multiplyScalar(-moveDistance));
+    if (keys.d || keys.ArrowRight) localPlayer.position.add(right.multiplyScalar(moveDistance));
+    if (keys.a || keys.ArrowLeft) localPlayer.position.add(right.multiplyScalar(-moveDistance));
+
+    // Update camera position in first-person
+    camera.position.copy(localPlayer.position);
+    camera.position.y += 2;
+  } else {
+    // Top-down movement (screen-relative)
+    if (keys.w || keys.ArrowUp) localPlayer.position.z -= moveDistance;
+    if (keys.s || keys.ArrowDown) localPlayer.position.z += moveDistance;
+    if (keys.a || keys.ArrowLeft) localPlayer.position.x -= moveDistance;
+    if (keys.d || keys.ArrowRight) localPlayer.position.x += moveDistance;
+
+    // Update camera position in top-down
+    camera.position.set(
+      localPlayer.position.x,
+      localPlayer.position.y + TOPDOWN_HEIGHT,
+      localPlayer.position.z + TOPDOWN_HEIGHT
+    );
+    camera.rotation.set(TOPDOWN_ANGLE, 0, 0);
+  }
 
   // Keep player within bounds
   localPlayer.position.x = Math.max(-50, Math.min(50, localPlayer.position.x));
   localPlayer.position.z = Math.max(-50, Math.min(50, localPlayer.position.z));
-
-  // Update camera position to follow player
-  camera.position.copy(localPlayer.position);
-  camera.position.y += 2; // Slightly above player
 
   // Update projectiles
   const now = Date.now();
