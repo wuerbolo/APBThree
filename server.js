@@ -126,6 +126,15 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Handle shooting
+  socket.on('shoot', (data) => {
+    // Broadcast the shot to all other players
+    socket.broadcast.emit('shoot', {
+      ...data,
+      playerId: socket.id
+    });
+  });
+
   // Handle disconnection
   socket.on('disconnect', () => {
     console.log('Player disconnected:', socket.id);

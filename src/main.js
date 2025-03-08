@@ -8,6 +8,67 @@ const renderer = new THREE.WebGLRenderer();
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
+// Mouse look controls
+let isPointerLocked = false;
+let yaw = 0;
+let pitch = 0;
+const mouseSensitivity = 0.002;
+
+// Request pointer lock on click
+renderer.domElement.addEventListener('click', () => {
+  if (!isPointerLocked) {
+    renderer.domElement.requestPointerLock();
+  }
+});
+
+// Handle pointer lock state changes
+document.addEventListener('pointerlockchange', () => {
+  isPointerLocked = document.pointerLockElement === renderer.domElement;
+});
+
+// Mouse movement handler
+document.addEventListener('mousemove', (event) => {
+  if (isPointerLocked) {
+    yaw -= event.movementX * mouseSensitivity;
+    pitch -= event.movementY * mouseSensitivity;
+    pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch)); // Clamp pitch
+  }
+});
+
+// Projectile management
+const projectiles = new Map();
+const projectileGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+const projectileMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+const PROJECTILE_SPEED = 1;
+const PROJECTILE_LIFETIME = 3000; // 3 seconds
+
+// Handle shooting
+document.addEventListener('mousedown', (event) => {
+  if (event.button === 0 && isPointerLocked) { // Left click only
+    const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
+    
+    // Set initial position slightly in front of the camera
+    const direction = new THREE.Vector3(0, 0, -1);
+    direction.applyQuaternion(camera.quaternion);
+    projectile.position.copy(camera.position).add(direction.multiplyScalar(2));
+    
+    // Store direction for movement
+    projectile.direction = direction;
+    projectile.createdAt = Date.now();
+    
+    scene.add(projectile);
+    const projectileId = Date.now().toString();
+    projectiles.set(projectileId, projectile);
+    
+    // Emit shoot event
+    socket.emit('shoot', {
+      id: projectileId,
+      position: projectile.position.toArray(),
+      direction: direction.toArray()
+    });
+  }
+});
+
 // Lighting
 const ambientLight = new THREE.AmbientLight(0x404040);
 scene.add(ambientLight);
@@ -48,34 +109,6 @@ scene.add(localPlayer);
 // Store for remote players and NPCs
 const remotePlayers = new Map();
 const npcs = new Map();
-
-// Camera setup
-camera.position.set(0, 30, 50);
-camera.lookAt(localPlayer.position);
-
-// Movement
-const keys = {
-  w: false,
-  s: false,
-  a: false,
-  d: false,
-  ArrowUp: false,
-  ArrowDown: false,
-  ArrowLeft: false,
-  ArrowRight: false
-};
-
-window.addEventListener('keydown', (e) => {
-  if (keys.hasOwnProperty(e.key)) {
-    keys[e.key] = true;
-  }
-});
-
-window.addEventListener('keyup', (e) => {
-  if (keys.hasOwnProperty(e.key)) {
-    keys[e.key] = false;
-  }
-});
 
 // Socket.IO setup
 const socket = io('http://localhost:3000');
@@ -129,12 +162,46 @@ socket.on('playerLeft', (id) => {
 socket.on('npcMoved', ({ id, position }) => {
   const npcCube = npcs.get(id);
   if (npcCube) {
-    // Smoothly interpolate NPC movement
     const currentPos = npcCube.position;
     const targetPos = new THREE.Vector3(position.x, position.y, position.z);
     const lerpFactor = 0.1;
-
     currentPos.lerp(targetPos, lerpFactor);
+  }
+});
+
+// Handle remote projectiles
+socket.on('shoot', ({ id, position, direction }) => {
+  if (!projectiles.has(id)) { // Don't duplicate local projectiles
+    const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
+    projectile.position.set(...position);
+    projectile.direction = new THREE.Vector3(...direction);
+    projectile.createdAt = Date.now();
+    scene.add(projectile);
+    projectiles.set(id, projectile);
+  }
+});
+
+// Movement
+const keys = {
+  w: false,
+  s: false,
+  a: false,
+  d: false,
+  ArrowUp: false,
+  ArrowDown: false,
+  ArrowLeft: false,
+  ArrowRight: false
+};
+
+window.addEventListener('keydown', (e) => {
+  if (keys.hasOwnProperty(e.key)) {
+    keys[e.key] = true;
+  }
+});
+
+window.addEventListener('keyup', (e) => {
+  if (keys.hasOwnProperty(e.key)) {
+    keys[e.key] = false;
   }
 });
 
@@ -145,21 +212,43 @@ const MOVE_SPEED = 0.5;
 function animate() {
   requestAnimationFrame(animate);
 
-  // Handle movement
+  // Update camera rotation
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = yaw;
+  camera.rotation.x = pitch;
+
+  // Handle movement relative to camera direction
   const moveDistance = MOVE_SPEED;
-  if (keys.w || keys.ArrowUp) localPlayer.position.z -= moveDistance;
-  if (keys.s || keys.ArrowDown) localPlayer.position.z += moveDistance;
-  if (keys.a || keys.ArrowLeft) localPlayer.position.x -= moveDistance;
-  if (keys.d || keys.ArrowRight) localPlayer.position.x += moveDistance;
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+  forward.y = 0; // Keep movement horizontal
+  forward.normalize();
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+  right.y = 0;
+  right.normalize();
+
+  if (keys.w || keys.ArrowUp) localPlayer.position.add(forward.multiplyScalar(moveDistance));
+  if (keys.s || keys.ArrowDown) localPlayer.position.add(forward.multiplyScalar(-moveDistance));
+  if (keys.d || keys.ArrowRight) localPlayer.position.add(right.multiplyScalar(moveDistance));
+  if (keys.a || keys.ArrowLeft) localPlayer.position.add(right.multiplyScalar(-moveDistance));
 
   // Keep player within bounds
   localPlayer.position.x = Math.max(-50, Math.min(50, localPlayer.position.x));
   localPlayer.position.z = Math.max(-50, Math.min(50, localPlayer.position.z));
 
   // Update camera position to follow player
-  camera.position.x = localPlayer.position.x;
-  camera.position.z = localPlayer.position.z + 50;
-  camera.lookAt(localPlayer.position);
+  camera.position.copy(localPlayer.position);
+  camera.position.y += 2; // Slightly above player
+
+  // Update projectiles
+  const now = Date.now();
+  projectiles.forEach((projectile, id) => {
+    if (now - projectile.createdAt > PROJECTILE_LIFETIME) {
+      scene.remove(projectile);
+      projectiles.delete(id);
+    } else {
+      projectile.position.add(projectile.direction.clone().multiplyScalar(PROJECTILE_SPEED));
+    }
+  });
 
   // Emit position update
   socket.emit('updatePosition', {
