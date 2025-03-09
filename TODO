@@ -1,0 +1,35 @@
+Combat System (Basic)
+    Add health for players and NPCs.
+    Implement a simple shooting mechanic with damage.
+    Create a basic HUD showing health.
+NPC Types (Civilians and Quest Givers)
+    Add civilian NPCs that move randomly.
+    Introduce quest giver NPCs with basic interaction (e.g., press ‘E’ to talk).
+Quests/Missions
+    Build a mission system with objectives and rewards.
+    Start with simple quests like “Talk to NPC” or “Reach point X.”
+Car System (Basic)
+    Add a car players can enter/exit and drive.
+    Implement basic controls and collision detection.
+    Add car health that decreases with damage.
+Money System
+    Introduce currency earned from quests.
+    Add a simple shop to spend money (e.g., ammo or health packs).
+Faction System
+    Let players choose a faction (criminal or enforcer).
+    Adjust mission types based on faction choice.
+Fame/Infamy System
+    Track reputation points from actions.
+    Add a basic leaderboard or “most wanted” display.
+Tutorial
+    Create a guided intro to teach controls and mechanics.
+    Integrate it as the first-time player experience.
+NPC Types (Police and Criminals)
+    Add police NPCs that chase players based on actions.
+    Add criminal NPCs that fight or commit crimes.
+Assets/World Building
+    Replace placeholders with low-poly models (e.g., cars, buildings).
+    Expand the city with additional areas or interactive objects.
+Combat System (Advanced)
+    Add more weapons (e.g., rifle, shotgun) and ammo types.
+    Enhance the HUD with features like a mini-map or objective markers.

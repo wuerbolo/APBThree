@@ -74,12 +74,12 @@ export class NetworkSystem {
           npc.updateHealthBar();
           console.log(`NPC ${id} health changed from ${oldHealth} to ${health}`);
 
-          // Update color based on health
-          if (npc.isAlive) {
+          // Update color based on alive status first
+          if (!isAlive) {
+            npc.mesh.material.color.setHex(0x333333); // Grey when dead
+          } else {
             const healthFactor = health / 50;
             npc.mesh.material.color.setRGB(0, 0.533 * healthFactor + 0.267, healthFactor);
-          } else {
-            npc.mesh.material.color.setHex(0x333333); // Dark gray for dead NPCs
           }
         }
       } else {
@@ -94,16 +94,28 @@ export class NetworkSystem {
           player.updateHealthBar();
           console.log(`Player ${id} health changed from ${oldHealth} to ${health}`);
 
-          // Update color based on health
-          if (player.isAlive) {
+          // Show death overlay for local player when they die
+          if (id === this.socket.id && oldHealth > 0 && health <= 0) {
+            console.log('Local player died, showing death overlay');
+            this.gameScene.hud.showDeathOverlay();
+          }
+
+          // Update color based on alive status first
+          if (!isAlive) {
+            player.mesh.material.color.setHex(0x333333); // Grey when dead
+          } else if (health === 100) { // Full health (respawn)
+            if (player === this.gameScene.localPlayer) {
+              player.mesh.material.color.setRGB(0, 1, 0); // Full green
+            } else {
+              player.mesh.material.color.setRGB(1, 0, 0); // Full red
+            }
+          } else { // Partial health
             const healthFactor = health / 100;
             if (player === this.gameScene.localPlayer) {
-              player.mesh.material.color.setRGB(healthFactor, 1, healthFactor); // Green to dark green
+              player.mesh.material.color.setRGB(0, healthFactor, 0); // Green varying with health
             } else {
-              player.mesh.material.color.setRGB(1, healthFactor, healthFactor); // Red to dark red
+              player.mesh.material.color.setRGB(1, healthFactor, healthFactor); // Red varying with health
             }
-          } else {
-            player.mesh.material.color.setHex(0x333333); // Dark gray for dead players
           }
         }
       }

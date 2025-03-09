@@ -151,6 +151,30 @@ export class NetworkSystem {
         }
       });
 
+      // Handle respawn events
+      socket.on('respawn', (position) => {
+        const player = this.players.get(socket.id);
+        if (player) {
+          player.health = 100;
+          player.isAlive = true;
+          player.updatePosition(position);
+
+          // Broadcast respawn to all clients
+          this.io.emit('playerRespawned', {
+            id: socket.id,
+            position
+          });
+
+          // Broadcast health update
+          this.io.emit('updateHealth', {
+            id: socket.id,
+            health: player.health,
+            isAlive: true,
+            isNPC: false
+          });
+        }
+      });
+
       // Handle disconnection
       socket.on('disconnect', () => {
         console.log('Player disconnected:', socket.id);

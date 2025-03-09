@@ -96,12 +96,17 @@ export class Player {
     this.isAlive = this.health > 0;
     this.updateHealthBar();
 
-    // Update material color based on health
-    const healthFactor = this.health / 100;
-    const color = this.isLocal ? 
-      new THREE.Color(healthFactor, 1, healthFactor) : // Green to dark green for local
-      new THREE.Color(1, healthFactor, healthFactor);  // Red to dark red for remote
-    this.mesh.material.color = color;
+    // Update material color based on health and alive status
+    if (!this.isAlive) {
+      this.mesh.material.color.setHex(0x333333); // Grey when dead
+    } else {
+      const healthFactor = this.health / 100;
+      if (this.isLocal) {
+        this.mesh.material.color.setRGB(0, healthFactor, 0); // Green varying with health
+      } else {
+        this.mesh.material.color.setRGB(1, healthFactor, healthFactor); // Red varying with health
+      }
+    }
 
     return this.isAlive;
   }
@@ -176,5 +181,26 @@ export class Player {
     if (this.keys.hasOwnProperty(event.key)) {
       this.keys[event.key] = false;
     }
+  }
+
+  respawn() {
+    // Reset health and alive status
+    this.health = 100;
+    this.isAlive = true;
+
+    // Generate random spawn position
+    const x = Math.random() * 80 - 40; // -40 to 40
+    const z = Math.random() * 80 - 40; // -40 to 40
+    this.mesh.position.set(x, 1, z);
+    
+    // Reset material color to full health color based on player type
+    if (this.isLocal) {
+      this.mesh.material.color.setRGB(0, 1, 0); // Full green for local player
+    } else {
+      this.mesh.material.color.setRGB(1, 0, 0); // Full red for remote player
+    }
+    
+    // Update health bar
+    this.updateHealthBar();
   }
 } 

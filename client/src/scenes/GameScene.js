@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Player } from '../components/Player';
 import { NPC } from '../components/NPC';
 import { NetworkSystem } from '../systems/Network';
+import { HUD } from '../systems/HUD.js';
 
 export class GameScene {
   constructor() {
@@ -29,9 +30,11 @@ export class GameScene {
     
     // Setup systems
     this.network = new NetworkSystem(this);
+    this.hud = new HUD(this);
     
     // Setup event listeners
     this.setupEventListeners();
+    this.initNetworkHandlers();
   }
 
   setupScene() {
@@ -221,6 +224,36 @@ export class GameScene {
       mesh.createdAt = Date.now();
       this.scene.add(mesh);
       this.projectiles.set(id, mesh);
+    }
+  }
+
+  initNetworkHandlers() {
+    // Only handle respawn events here since health updates are handled in NetworkSystem
+    this.network.socket.on('playerRespawned', ({ id, position }) => {
+      const player = id === this.network.socket.id ? 
+        this.localPlayer : 
+        this.remotePlayers.get(id);
+      
+      if (player) {
+        player.respawn();
+        player.mesh.position.copy(position);
+      }
+    });
+  }
+
+  handleRespawn() {
+    if (this.localPlayer) {
+      const spawnPosition = {
+        x: Math.random() * 80 - 40,
+        y: 1,
+        z: Math.random() * 80 - 40
+      };
+      
+      this.localPlayer.respawn();
+      this.localPlayer.mesh.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);
+      
+      // Notify server about respawn
+      this.network.socket.emit('respawn', spawnPosition);
     }
   }
 
