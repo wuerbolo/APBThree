@@ -4,6 +4,8 @@ export class Player {
   constructor(id, isLocal = false) {
     this.id = id;
     this.isLocal = isLocal;
+    this.health = 100;
+    this.isAlive = true;
     
     // Create mesh
     const geometry = new THREE.BoxGeometry(2, 2, 2);
@@ -21,10 +23,98 @@ export class Player {
     };
     this.moveSpeed = 0.5;
     this.moveVector = new THREE.Vector3();
+
+    // Create health bar
+    this.createHealthBar();
+  }
+
+  createHealthBar() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 100;
+    canvas.height = 10;
+    this.healthBarTexture = new THREE.CanvasTexture(canvas);
+    this.healthBarContext = canvas.getContext('2d');
+
+    const healthBarGeometry = new THREE.PlaneGeometry(2, 0.2);
+    const healthBarMaterial = new THREE.MeshBasicMaterial({
+      map: this.healthBarTexture,
+      transparent: true,
+      depthTest: false,
+      side: THREE.DoubleSide
+    });
+
+    this.healthBar = new THREE.Mesh(healthBarGeometry, healthBarMaterial);
+    this.healthBar.position.y = 2.5; // Position above player
+
+    // Create a container for the health bar that will handle the billboard effect
+    this.healthBarContainer = new THREE.Object3D();
+    this.healthBarContainer.add(this.healthBar);
+    this.mesh.add(this.healthBarContainer);
+
+    this.updateHealthBar();
+  }
+
+  updateHealthBar() {
+    const ctx = this.healthBarContext;
+    const width = ctx.canvas.width;
+    const height = ctx.canvas.height;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+
+    // Draw background
+    ctx.fillStyle = '#333333';
+    ctx.fillRect(0, 0, width, height);
+
+    // Draw health
+    const healthWidth = (this.health / 100) * width;
+    ctx.fillStyle = this.health > 50 ? '#00ff00' : this.health > 25 ? '#ffff00' : '#ff0000';
+    ctx.fillRect(0, 0, healthWidth, height);
+
+    // Force texture update
+    if (this.healthBarTexture) {
+      this.healthBarTexture.needsUpdate = true;
+      // Update material to ensure texture refresh
+      this.healthBar.material.needsUpdate = true;
+    }
+  }
+
+  updateHealthBarRotation(camera) {
+    // Make health bar face camera
+    if (this.healthBarContainer) {
+      const cameraPosition = camera.position.clone();
+      this.healthBarContainer.lookAt(cameraPosition);
+      
+      // Keep the health bar vertical
+      this.healthBarContainer.rotation.x = 0;
+      this.healthBarContainer.rotation.z = 0;
+    }
+  }
+
+  takeDamage(damage) {
+    this.health = Math.max(0, this.health - damage);
+    this.isAlive = this.health > 0;
+    this.updateHealthBar();
+
+    // Update material color based on health
+    const healthFactor = this.health / 100;
+    const color = this.isLocal ? 
+      new THREE.Color(healthFactor, 1, healthFactor) : // Green to dark green for local
+      new THREE.Color(1, healthFactor, healthFactor);  // Red to dark red for remote
+    this.mesh.material.color = color;
+
+    return this.isAlive;
+  }
+
+  heal(amount) {
+    this.health = Math.min(100, this.health + amount);
+    this.isAlive = true;
+    this.updateHealthBar();
+    return this.health;
   }
 
   update(cameraMode, camera) {
-    if (!this.isLocal) return;
+    if (!this.isLocal || !this.isAlive) return;
 
     const moveDistance = this.moveSpeed;
     this.moveVector.set(0, 0, 0);
@@ -59,6 +149,9 @@ export class Player {
     // Keep player within bounds
     this.mesh.position.x = Math.max(-50, Math.min(50, this.mesh.position.x));
     this.mesh.position.z = Math.max(-50, Math.min(50, this.mesh.position.z));
+
+    // Update health bar to face camera
+    this.updateHealthBarRotation(camera);
   }
 
   setPosition(position) {

@@ -29,6 +29,9 @@ importers:
       socket.io:
         specifier: ^4.7.2
         version: 4.8.1
+      three:
+        specifier: ^0.162.0
+        version: 0.162.0
 
 packages:
 
@@ -609,6 +612,9 @@ packages:
 
   three@0.160.1:
     resolution: {integrity: sha512-Bgl2wPJypDOZ1stAxwfWAcJ0WQf7QzlptsxkjYiURPz+n5k4RBDLsq+6f9Y75TYxn6aHLcWz+JNmwTOXWrQTBQ==}
+
+  three@0.162.0:
+    resolution: {integrity: sha512-xfCYj4RnlozReCmUd+XQzj6/5OjDNHBy5nT6rVwrOKGENAvpXe2z1jL+DZYaMu4/9pNsjH/4Os/VvS9IrH7IOQ==}
 
   toidentifier@1.0.1:
     resolution: {integrity: sha512-o5sSPKEkg/DIQNmH43V0/uerLrpzVedkUh8tGNvaeXpfpuwjKenlSox/2O/BTlZUtEe+JG7s5YhEz608PlAHRA==}
@@ -1260,6 +1266,8 @@ snapshots:
   statuses@2.0.1: {}
 
   three@0.160.1: {}
+
+  three@0.162.0: {}
 
   toidentifier@1.0.1: {}
 

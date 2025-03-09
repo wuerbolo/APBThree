@@ -232,19 +232,84 @@ export class GameScene {
     }
 
     // Update NPCs
-    this.npcs.forEach(npc => npc.update());
+    this.npcs.forEach(npc => npc.update(this.camera));
 
     // Update projectiles
     const now = Date.now();
     this.projectiles.forEach((projectile, id) => {
+      // Check if projectile is out of bounds
+      if (projectile.position.length() > 100) {
+        this.scene.remove(projectile);
+        this.projectiles.delete(id);
+        return;
+      }
+
+      // Check if projectile has expired
       if (now - projectile.createdAt > 3000) {
         this.scene.remove(projectile);
         this.projectiles.delete(id);
-      } else {
-        projectile.position.add(
-          projectile.direction.clone().multiplyScalar(1)
-        );
+        return;
       }
+
+      // Move projectile
+      projectile.position.add(
+        projectile.direction.clone().multiplyScalar(1)
+      );
+
+      // Check for collisions with players and NPCs
+      const hitRadius = 1; // Collision radius
+
+      // Check remote players
+      this.remotePlayers.forEach((player) => {
+        if (player.isAlive && projectile.position.distanceTo(player.mesh.position) < hitRadius) {
+          console.log(`Detected collision with player ${player.id} at distance ${projectile.position.distanceTo(player.mesh.position)}`);
+          
+          // Send damage event first
+          this.network.sendDamage({
+            targetId: player.id,
+            damage: 10,
+            isNPC: false
+          });
+
+          // Visual feedback
+          const originalColor = player.mesh.material.color.clone();
+          player.mesh.material.color.setHex(0xffff00);
+          
+          setTimeout(() => {
+            player.mesh.material.color.copy(originalColor);
+          }, 100);
+
+          // Remove projectile
+          this.scene.remove(projectile);
+          this.projectiles.delete(id);
+        }
+      });
+
+      // Check NPCs
+      this.npcs.forEach((npc) => {
+        if (npc.isAlive && projectile.position.distanceTo(npc.mesh.position) < hitRadius) {
+          console.log(`Detected collision with NPC ${npc.id} at distance ${projectile.position.distanceTo(npc.mesh.position)}`);
+          
+          // Send damage event first
+          this.network.sendDamage({
+            targetId: npc.id,
+            damage: 10,
+            isNPC: true
+          });
+
+          // Visual feedback
+          const originalColor = npc.mesh.material.color.clone();
+          npc.mesh.material.color.setHex(0xff0000);
+          
+          setTimeout(() => {
+            npc.mesh.material.color.copy(originalColor);
+          }, 100);
+
+          // Remove projectile
+          this.scene.remove(projectile);
+          this.projectiles.delete(id);
+        }
+      });
     });
 
     // Update camera

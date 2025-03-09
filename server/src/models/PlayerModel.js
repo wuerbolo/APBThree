@@ -3,6 +3,7 @@ export class PlayerModel {
     this.id = id;
     this.position = position;
     this.health = 100;
+    this.isAlive = true;
   }
 
   updatePosition(position) {
@@ -15,11 +16,21 @@ export class PlayerModel {
 
   takeDamage(amount) {
     this.health = Math.max(0, this.health - amount);
-    return this.health;
+    this.isAlive = this.health > 0;
+    console.log(`Server: Player ${this.id} health now ${this.health}`);
+    return this.isAlive;
   }
 
   heal(amount) {
     this.health = Math.min(100, this.health + amount);
+    this.isAlive = true;
     return this.health;
+  }
+
+  getHealth() {
+    return {
+      health: this.health,
+      isAlive: this.isAlive
+    };
   }
 } 

@@ -1,6 +1,7 @@
 import { Server } from 'socket.io';
-import { PlayerModel } from '../models/PlayerModel';
-import { NPCModel } from '../models/NPCModel';
+import { PlayerModel } from '../models/PlayerModel.js';
+import { NPCModel } from '../models/NPCModel.js';
+import * as THREE from 'three';
 
 export class NetworkSystem {
   constructor(server) {
@@ -18,6 +19,8 @@ export class NetworkSystem {
   }
 
   setupSocketHandlers() {
+    console.log('Setting up socket handlers...');
+    
     this.io.on('connection', (socket) => {
       console.log('Player connected:', socket.id);
 
@@ -40,7 +43,8 @@ export class NetworkSystem {
         players: Array.from(this.players.entries()).map(([id, p]) => [id, p.getPosition()]),
         npcs: Array.from(this.npcs.entries()).map(([id, npc]) => ({
           id,
-          position: npc.getPosition()
+          position: npc.getPosition(),
+          health: npc.getHealth()
         }))
       });
 
@@ -50,7 +54,7 @@ export class NetworkSystem {
         position: initialPosition
       });
 
-      // Handle position updates
+      // Handle position updates - no logging needed for frequent updates
       socket.on('updatePosition', (position) => {
         const player = this.players.get(socket.id);
         if (player) {
@@ -62,12 +66,89 @@ export class NetworkSystem {
         }
       });
 
-      // Handle shooting
+      // Handle shooting - only log when shots hit
       socket.on('shoot', (data) => {
         socket.broadcast.emit('shoot', {
           ...data,
           playerId: socket.id
         });
+      });
+
+      // Handle damage events
+      socket.on('damage', ({ targetId, damage, isNPC }, callback) => {
+        try {
+          if (isNPC) {
+            const npc = this.npcs.get(targetId);
+            if (npc) {
+              const isAlive = npc.takeDamage(damage);
+              console.log(`NPC ${targetId} took ${damage} damage. Health: ${npc.health}, Alive: ${isAlive}`);
+              
+              const updateData = {
+                id: targetId,
+                health: npc.health,
+                isAlive,
+                isNPC: true
+              };
+              this.io.emit('updateHealth', updateData);
+              
+              if (callback) callback({ success: true });
+            } else {
+              console.log(`NPC ${targetId} not found`);
+              if (callback) callback({ error: 'NPC not found' });
+            }
+          } else {
+            const player = this.players.get(targetId);
+            if (player) {
+              const isAlive = player.takeDamage(damage);
+              console.log(`Player ${targetId} took ${damage} damage. Health: ${player.health}, Alive: ${isAlive}`);
+              
+              const updateData = {
+                id: targetId,
+                health: player.health,
+                isAlive,
+                isNPC: false
+              };
+              this.io.emit('updateHealth', updateData);
+              
+              if (callback) callback({ success: true });
+            } else {
+              console.log(`Player ${targetId} not found`);
+              if (callback) callback({ error: 'Player not found' });
+            }
+          }
+        } catch (error) {
+          console.error('Error processing damage event:', error);
+          if (callback) callback({ error: 'Internal server error' });
+        }
+      });
+
+      // Handle healing events
+      socket.on('heal', ({ targetId, amount, isNPC }) => {
+        if (isNPC) {
+          const npc = this.npcs.get(targetId);
+          if (npc) {
+            const health = npc.heal(amount);
+            console.log(`NPC ${targetId} healed ${amount}. New health: ${health}`);
+            this.io.emit('updateHealth', {
+              id: targetId,
+              health,
+              isAlive: true,
+              isNPC: true
+            });
+          }
+        } else {
+          const player = this.players.get(targetId);
+          if (player) {
+            const health = player.heal(amount);
+            console.log(`Player ${targetId} healed ${amount}. New health: ${health}`);
+            this.io.emit('updateHealth', {
+              id: targetId,
+              health,
+              isAlive: true,
+              isNPC: false
+            });
+          }
+        }
       });
 
       // Handle disconnection
@@ -99,10 +180,12 @@ export class NetworkSystem {
     setInterval(() => {
       this.npcs.forEach((npc, id) => {
         const newPosition = npc.update();
-        this.io.emit('npcMoved', {
-          id,
-          position: newPosition
-        });
+        if (npc.isAlive) {
+          this.io.emit('npcMoved', {
+            id,
+            position: newPosition
+          });
+        }
       });
     }, 50); // Update every 50ms
   }

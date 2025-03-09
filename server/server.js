@@ -3,7 +3,7 @@ import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import path from 'path';
-import { NetworkSystem } from './systems/Network.js';
+import { NetworkSystem } from './src/systems/Network.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

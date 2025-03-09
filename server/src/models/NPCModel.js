@@ -3,11 +3,14 @@ export class NPCModel {
     this.id = id;
     this.position = position;
     this.targetPosition = this.getNewTargetPosition();
-    this.health = 100;
+    this.health = 50;
+    this.isAlive = true;
     this.speed = 0.2;
   }
 
   update() {
+    if (!this.isAlive) return this.position;
+
     const dx = this.targetPosition.x - this.position.x;
     const dz = this.targetPosition.z - this.position.z;
     const distance = Math.sqrt(dx * dx + dz * dz);
@@ -39,11 +42,21 @@ export class NPCModel {
 
   takeDamage(amount) {
     this.health = Math.max(0, this.health - amount);
-    return this.health;
+    this.isAlive = this.health > 0;
+    console.log(`Server: NPC ${this.id} health now ${this.health}`);
+    return this.isAlive;
   }
 
   heal(amount) {
-    this.health = Math.min(100, this.health + amount);
+    this.health = Math.min(50, this.health + amount);
+    this.isAlive = true;
     return this.health;
+  }
+
+  getHealth() {
+    return {
+      health: this.health,
+      isAlive: this.isAlive
+    };
   }
 } 
