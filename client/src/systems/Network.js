@@ -57,6 +57,29 @@ export class NetworkSystem {
       this.gameScene.updateNPC(id, position);
     });
 
+    this.socket.on('removeNPC', (id) => {
+      console.log(`Removing NPC ${id} from scene`);
+      const npc = this.gameScene.npcs.get(id);
+      if (npc) {
+        this.gameScene.scene.remove(npc.mesh);
+        this.gameScene.npcs.delete(id);
+      }
+    });
+
+    this.socket.on('spawnNPC', ({ id, position, health }) => {
+      console.log(`Spawning new NPC ${id} at position:`, position);
+      this.gameScene.addNPC(id, position);
+      // Update health if provided
+      if (health) {
+        const npc = this.gameScene.npcs.get(id);
+        if (npc) {
+          npc.health = health.health;
+          npc.isAlive = health.isAlive;
+          npc.updateHealthBar();
+        }
+      }
+    });
+
     this.socket.on('shoot', ({ id, position, direction, playerId }) => {
       this.gameScene.handleRemoteShot(id, position, direction);
     });

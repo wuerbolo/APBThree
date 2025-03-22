@@ -6,6 +6,7 @@ export class NPCModel {
     this.health = 50;
     this.isAlive = true;
     this.speed = 0.2;
+    this.despawnTimer = null;
   }
 
   update() {
@@ -21,6 +22,10 @@ export class NPCModel {
       this.position.x += (dx / distance) * this.speed;
       this.position.z += (dz / distance) * this.speed;
     }
+
+    // Keep within bounds
+    this.position.x = Math.max(-50, Math.min(50, this.position.x));
+    this.position.z = Math.max(-50, Math.min(50, this.position.z));
 
     return this.position;
   }
@@ -40,14 +45,31 @@ export class NPCModel {
     return this.position;
   }
 
-  takeDamage(amount) {
-    this.health = Math.max(0, this.health - amount);
+  takeDamage(damage) {
+    this.health = Math.max(0, this.health - damage);
     this.isAlive = this.health > 0;
-    console.log(`Server: NPC ${this.id} health now ${this.health}`);
+
+    // Start despawn timer if NPC dies
+    if (!this.isAlive && !this.despawnTimer) {
+      this.despawnTimer = setTimeout(() => {
+        // We'll emit the event through the NetworkSystem
+        // The actual removal will be handled by the callback
+        if (this.onDespawn) {
+          this.onDespawn(this.id);
+        }
+      }, 20000); // 20 seconds
+    }
+
     return this.isAlive;
   }
 
   heal(amount) {
+    // Clear despawn timer if healing a dead NPC
+    if (!this.isAlive && this.despawnTimer) {
+      clearTimeout(this.despawnTimer);
+      this.despawnTimer = null;
+    }
+
     this.health = Math.min(50, this.health + amount);
     this.isAlive = true;
     return this.health;
@@ -58,5 +80,14 @@ export class NPCModel {
       health: this.health,
       isAlive: this.isAlive
     };
+  }
+
+  updatePosition(position) {
+    this.position = position;
+  }
+
+  // Set callback for when NPC should be despawned
+  setDespawnCallback(callback) {
+    this.onDespawn = callback;
   }
 } 

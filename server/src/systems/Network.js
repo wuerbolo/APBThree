@@ -1,6 +1,6 @@
 import { Server } from 'socket.io';
 import { PlayerModel } from '../models/PlayerModel.js';
-import { NPCModel } from '../models/NPCModel.js';
+import { NPCSpawner } from './NPCSpawner.js';
 import * as THREE from 'three';
 
 export class NetworkSystem {
@@ -15,6 +15,9 @@ export class NetworkSystem {
     this.players = new Map();
     this.npcs = new Map();
     this.setupSocketHandlers();
+    
+    // Initialize NPC spawner
+    this.npcSpawner = new NPCSpawner(this);
     this.startNPCLoop();
   }
 
@@ -184,23 +187,7 @@ export class NetworkSystem {
     });
   }
 
-  initializeNPCs(numNPCs = 5) {
-    for (let i = 0; i < numNPCs; i++) {
-      const id = `npc-${i}`;
-      const position = {
-        x: (Math.random() * 100) - 50,
-        y: 1,
-        z: (Math.random() * 100) - 50
-      };
-      
-      const npc = new NPCModel(id, position);
-      this.npcs.set(id, npc);
-    }
-  }
-
   startNPCLoop() {
-    this.initializeNPCs();
-
     setInterval(() => {
       this.npcs.forEach((npc, id) => {
         const newPosition = npc.update();
