@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { resolveBuildingCollision } from '../utils/collision.js';
 
 export class Player {
   constructor(id, isLocal = false) {
@@ -219,6 +220,9 @@ export class Player {
     // Keep player within bounds
     this.mesh.position.x = Math.max(-50, Math.min(50, this.mesh.position.x));
     this.mesh.position.z = Math.max(-50, Math.min(50, this.mesh.position.z));
+
+    // Push back out of any building we just walked into
+    resolveBuildingCollision(this.mesh.position);
 
     // Update health bar to face camera
     this.updateHealthBarRotation(camera);

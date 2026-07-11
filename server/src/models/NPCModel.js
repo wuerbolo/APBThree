@@ -1,3 +1,5 @@
+import { resolveBuildingCollision } from '../utils/collision.js';
+
 export class NPCModel {
   constructor(id, position, faction = null) {
     this.id = id;
@@ -41,6 +43,9 @@ export class NPCModel {
     // Keep within bounds
     this.position.x = Math.max(-50, Math.min(50, this.position.x));
     this.position.z = Math.max(-50, Math.min(50, this.position.z));
+
+    // Don't wander into buildings
+    resolveBuildingCollision(this.position);
 
     return this.position;
   }

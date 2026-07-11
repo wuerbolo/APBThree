@@ -3,6 +3,7 @@ import { Player } from '../components/Player';
 import { NPC } from '../components/NPC';
 import { NetworkSystem } from '../systems/Network';
 import { HUD } from '../systems/HUD.js';
+import { BUILDINGS } from '../utils/collision.js';
 
 export class GameScene {
   constructor() {
@@ -71,17 +72,19 @@ export class GameScene {
     ground.position.y = -0.5;
     this.scene.add(ground);
 
-    // Buildings
-    const buildingGeometry = new THREE.BoxGeometry(10, 20, 10);
+    // Buildings (collision bounds for these live in utils/collision.js)
     const buildingMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
 
-    const building1 = new THREE.Mesh(buildingGeometry, buildingMaterial);
-    building1.position.set(-20, 10, -20);
-    this.scene.add(building1);
-
-    const building2 = new THREE.Mesh(buildingGeometry, buildingMaterial);
-    building2.position.set(20, 10, 20);
-    this.scene.add(building2);
+    BUILDINGS.forEach(building => {
+      const geometry = new THREE.BoxGeometry(
+        building.halfWidth * 2,
+        building.height,
+        building.halfDepth * 2
+      );
+      const mesh = new THREE.Mesh(geometry, buildingMaterial);
+      mesh.position.set(building.x, building.height / 2, building.z);
+      this.scene.add(mesh);
+    });
   }
 
   setupEventListeners() {
