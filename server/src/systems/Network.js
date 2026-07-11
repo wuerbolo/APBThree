@@ -1,6 +1,7 @@
 import { Server } from 'socket.io';
 import { PlayerModel } from '../models/PlayerModel.js';
 import { NPCSpawner } from './NPCSpawner.js';
+import { CharacterSystem } from './CharacterSystem.js';
 import * as THREE from 'three';
 
 export class NetworkSystem {
@@ -14,6 +15,10 @@ export class NetworkSystem {
 
     this.players = new Map();
     this.npcs = new Map();
+    
+    // Initialize character system
+    this.characterSystem = new CharacterSystem();
+    
     this.setupSocketHandlers();
     
     // Initialize NPC spawner
@@ -39,25 +44,83 @@ export class NetworkSystem {
       const player = new PlayerModel(socket.id, initialPosition);
       this.players.set(socket.id, player);
 
-      // Send initial state
-      socket.emit('init', {
-        id: socket.id,
-        position: initialPosition,
-        players: Array.from(this.players.entries()).map(([id, p]) => [id, p.getPosition()]),
-        npcs: Array.from(this.npcs.entries()).map(([id, npc]) => ({
-          id,
-          position: npc.getPosition(),
-          health: npc.getHealth()
-        }))
-      });
+      // Check if player has a character
+      const existingCharacter = this.characterSystem.getCharacter(socket.id);
+      
+      if (existingCharacter) {
+        // Player has a character, associate it with the player
+        player.setCharacter(existingCharacter);
+        
+        // Send initialization with character data
+        socket.emit('init', {
+          id: socket.id,
+          position: initialPosition,
+          players: Array.from(this.players.entries()).map(([id, p]) => [
+            id, 
+            p.getPosition(),
+            p.hasCharacter() ? p.getCharacter().getData() : null
+          ]),
+          npcs: Array.from(this.npcs.entries()).map(([id, npc]) => ({
+            id,
+            position: npc.getPosition(),
+            health: npc.getHealth()
+          })),
+          character: existingCharacter.getData(),
+          hasCharacter: true
+        });
+      } else {
+        // Player doesn't have a character, tell client to show creation UI
+        socket.emit('init', {
+          id: socket.id,
+          position: initialPosition,
+          players: Array.from(this.players.entries()).map(([id, p]) => [
+            id, 
+            p.getPosition(),
+            p.hasCharacter() ? p.getCharacter().getData() : null
+          ]),
+          npcs: Array.from(this.npcs.entries()).map(([id, npc]) => ({
+            id,
+            position: npc.getPosition(),
+            health: npc.getHealth()
+          })),
+          hasCharacter: false
+        });
+      }
 
-      // Broadcast new player
+      // Broadcast new player to others
       socket.broadcast.emit('playerJoined', {
         id: socket.id,
-        position: initialPosition
+        position: initialPosition,
+        character: player.hasCharacter() ? player.getCharacter().getData() : null
       });
 
-      // Handle position updates - no logging needed for frequent updates
+      // Handle character creation
+      socket.on('createCharacter', ({ name, faction }, callback) => {
+        console.log(`Creating character for ${socket.id}: ${name} (${faction})`);
+        
+        // Validate faction
+        if (faction !== 'Criminal' && faction !== 'Enforcer') {
+          return callback({ success: false, error: 'Invalid faction' });
+        }
+        
+        // Create character
+        const character = this.characterSystem.createCharacter(socket.id, name, faction);
+        player.setCharacter(character);
+        
+        // Send character data back to the client
+        callback({ 
+          success: true, 
+          character: character.getData() 
+        });
+        
+        // Broadcast character data to other players
+        socket.broadcast.emit('playerUpdated', {
+          id: socket.id,
+          character: character.getData()
+        });
+      });
+
+      // Handle position updates
       socket.on('updatePosition', (position) => {
         const player = this.players.get(socket.id);
         if (player) {
@@ -69,7 +132,7 @@ export class NetworkSystem {
         }
       });
 
-      // Handle shooting - only log when shots hit
+      // Handle shooting
       socket.on('shoot', (data) => {
         socket.broadcast.emit('shoot', {
           ...data,
@@ -78,50 +141,130 @@ export class NetworkSystem {
       });
 
       // Handle damage events
-      socket.on('damage', ({ targetId, damage, isNPC }, callback) => {
-        try {
-          if (isNPC) {
-            const npc = this.npcs.get(targetId);
-            if (npc) {
-              const isAlive = npc.takeDamage(damage);
-              console.log(`NPC ${targetId} took ${damage} damage. Health: ${npc.health}, Alive: ${isAlive}`);
+      socket.on('damage', (data, callback) => {
+        console.log('Received damage event:', data);
+        
+        // Send acknowledgment immediately
+        if (callback) callback({ received: true });
+        
+        const { targetId, amount, isNPC } = data;
+        
+        // Get the attacker (the player who sent the damage event)
+        const attacker = this.players.get(socket.id);
+        if (!attacker) return; // Attacker not found
+        
+        // Check if attacker has a character with faction info
+        const attackerFaction = attacker.hasCharacter() ? attacker.getCharacter().faction : null;
+        
+        if (isNPC) {
+          // Player attacking NPC
+          const npc = this.npcs.get(targetId);
+          if (!npc) return; // NPC not found
+          
+          // Get the NPC's faction
+          const npcFaction = npc.faction;
+          
+          // Check faction rules:
+          // 1. If NPC is Civilian, damage is allowed
+          // 2. If player and NPC have the same faction, no damage (friendly fire disabled)
+          if (npcFaction === "Civilian" || npcFaction !== attackerFaction) {
+            // Damage is allowed
+            npc.takeDamage(amount);
+            console.log(`NPC ${targetId} (${npcFaction}) took ${amount} damage from ${socket.id} (${attackerFaction}). Health: ${npc.health}`);
+            
+            const isAlive = npc.health > 0;
+            
+            // Broadcast damage to all clients
+            this.io.emit('updateHealth', {
+              id: targetId,
+              health: npc.health,
+              isAlive: isAlive,
+              isNPC: true,
+              faction: npcFaction
+            });
+            
+            // If NPC died, handle it
+            if (!isAlive) {
+              console.log(`NPC ${targetId} died!`);
+              this.npcSpawner.onNPCDeath(targetId);
               
-              const updateData = {
-                id: targetId,
-                health: npc.health,
-                isAlive,
-                isNPC: true
-              };
-              this.io.emit('updateHealth', updateData);
-              
-              if (callback) callback({ success: true });
-            } else {
-              console.log(`NPC ${targetId} not found`);
-              if (callback) callback({ error: 'NPC not found' });
+              // Award XP or money to player who killed NPC
+              const playerWhoKilled = attacker;
+              if (playerWhoKilled.hasCharacter()) {
+                const character = playerWhoKilled.getCharacter();
+                character.money += 10; // Award 10 money per kill
+                
+                // Notify player of reward
+                socket.emit('characterUpdated', character.getData());
+              }
             }
           } else {
-            const player = this.players.get(targetId);
-            if (player) {
-              const isAlive = player.takeDamage(damage);
-              console.log(`Player ${targetId} took ${damage} damage. Health: ${player.health}, Alive: ${isAlive}`);
-              
-              const updateData = {
-                id: targetId,
-                health: player.health,
-                isAlive,
-                isNPC: false
-              };
-              this.io.emit('updateHealth', updateData);
-              
-              if (callback) callback({ success: true });
-            } else {
-              console.log(`Player ${targetId} not found`);
-              if (callback) callback({ error: 'Player not found' });
-            }
+            // Friendly fire - no damage applied
+            console.log(`Friendly fire prevented: ${socket.id} (${attackerFaction}) cannot damage NPC ${targetId} (${npcFaction})`);
+            socket.emit('damageRejected', { 
+              targetId, 
+              reason: 'FRIENDLY_FIRE',
+              message: 'Cannot damage NPCs of your own faction'
+            });
           }
-        } catch (error) {
-          console.error('Error processing damage event:', error);
-          if (callback) callback({ error: 'Internal server error' });
+        } else {
+          // Player attacking Player
+          const targetPlayer = this.players.get(targetId);
+          if (!targetPlayer) return; // Target player not found
+          
+          // Check if target has character info
+          const targetFaction = targetPlayer.hasCharacter() ? targetPlayer.getCharacter().faction : null;
+          
+          // Check faction rules:
+          // 1. If target is Civilian, damage is allowed
+          // 2. If attacker and target have the same faction, no damage (friendly fire off)
+          if (targetFaction === "Civilian" || targetFaction !== attackerFaction) {
+            // Damage is allowed
+            const wasAlive = targetPlayer.isAlive;
+            targetPlayer.takeDamage(amount);
+            
+            console.log(`Player ${targetId} (${targetFaction}) took ${amount} damage from ${socket.id} (${attackerFaction}). Health: ${targetPlayer.health}`);
+            
+            this.io.emit('updateHealth', {
+              id: targetId,
+              health: targetPlayer.health,
+              isAlive: targetPlayer.isAlive,
+              isNPC: false,
+              faction: targetFaction
+            });
+            
+            // If player died and was previously alive
+            if (wasAlive && !targetPlayer.isAlive) {
+              console.log(`Player ${targetId} was killed by ${socket.id}!`);
+              
+              // Award XP or reputation to the killer if both have characters
+              if (attacker.hasCharacter() && targetPlayer.hasCharacter()) {
+                const killerChar = attacker.getCharacter();
+                const victimChar = targetPlayer.getCharacter();
+                
+                // PvP reputation changes depend on faction relation
+                if (killerChar.faction !== victimChar.faction) {
+                  // Opposing faction kill - gain reputation
+                  killerChar.reputation += 5;
+                } else {
+                  // Same faction kill (shouldn't happen with friendly fire disabled)
+                  // but keep this as a fallback
+                  killerChar.reputation -= 10;
+                }
+                
+                // Notify killer of updated character stats
+                socket.emit('characterUpdated', killerChar.getData());
+              }
+            }
+          } else {
+            // Friendly fire - no damage applied
+            console.log(`Friendly fire prevented: ${socket.id} (${attackerFaction}) cannot damage player ${targetId} (${targetFaction})`);
+            socket.emit('damageRejected', { 
+              targetId, 
+              reason: 'FRIENDLY_FIRE',
+              message: 'Cannot damage players of your own faction'
+            });
+          }
         }
       });
 
@@ -181,6 +324,7 @@ export class NetworkSystem {
       // Handle disconnection
       socket.on('disconnect', () => {
         console.log('Player disconnected:', socket.id);
+        // Keep character data in memory but remove player
         this.players.delete(socket.id);
         this.io.emit('playerLeft', socket.id);
       });

@@ -16,6 +16,7 @@ export class GameScene {
     this.remotePlayers = new Map();
     this.npcs = new Map();
     this.projectiles = new Map();
+    this.character = null; // Store character data
     
     // Camera controls
     this.cameraMode = 'firstPerson';
@@ -178,10 +179,16 @@ export class GameScene {
     this.localPlayer.setPosition(position);
   }
 
-  addRemotePlayer(id, position) {
+  addRemotePlayer(id, position, characterData) {
     const player = new Player(id, false);
     this.scene.add(player.mesh);
     player.setPosition(position);
+    
+    // Store character data if available
+    if (characterData) {
+      player.character = characterData;
+    }
+    
     this.remotePlayers.set(id, player);
   }
 
@@ -200,8 +207,8 @@ export class GameScene {
     }
   }
 
-  addNPC(id, position) {
-    const npc = new NPC(id, position);
+  addNPC(id, position, faction = "Civilian") {
+    const npc = new NPC(id, position, faction);
     this.scene.add(npc.mesh);
     this.npcs.set(id, npc);
   }
@@ -209,7 +216,7 @@ export class GameScene {
   updateNPC(id, position) {
     const npc = this.npcs.get(id);
     if (npc) {
-      npc.setTargetPosition(position);
+      npc.setPosition(position);
     }
   }
 
@@ -243,17 +250,17 @@ export class GameScene {
 
   handleRespawn() {
     if (this.localPlayer) {
-      const spawnPosition = {
-        x: Math.random() * 80 - 40,
-        y: 1,
-        z: Math.random() * 80 - 40
-      };
+      // Generate new position
+      const x = Math.random() * 80 - 40; // -40 to 40
+      const z = Math.random() * 80 - 40; // -40 to 40
+      const position = { x, y: 1, z };
       
+      // Send respawn request to server
+      this.network.socket.emit('respawn', position);
+      
+      // Update local position immediately
+      this.localPlayer.setPosition(position);
       this.localPlayer.respawn();
-      this.localPlayer.mesh.position.set(spawnPosition.x, spawnPosition.y, spawnPosition.z);
-      
-      // Notify server about respawn
-      this.network.socket.emit('respawn', spawnPosition);
     }
   }
 
@@ -300,7 +307,7 @@ export class GameScene {
           // Send damage event first
           this.network.sendDamage({
             targetId: player.id,
-            damage: 10,
+            amount: 10,
             isNPC: false
           });
 
@@ -326,7 +333,7 @@ export class GameScene {
           // Send damage event first
           this.network.sendDamage({
             targetId: npc.id,
-            damage: 10,
+            amount: 10,
             isNPC: true
           });
 

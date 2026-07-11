@@ -67,7 +67,7 @@ export class NPCSpawner {
         // Generate unique ID
         const id = `npc-${Date.now()}`;
         
-        // Create new NPC
+        // Create new NPC - faction will be randomly assigned in the constructor
         const npc = new NPCModel(id, position);
         
         // Set up despawn callback
@@ -86,9 +86,10 @@ export class NPCSpawner {
         this.networkSystem.io.emit('spawnNPC', {
             id,
             position,
-            health: npc.getHealth()
+            health: npc.getHealth(),
+            faction: npc.faction
         });
 
-        console.log(`Spawned new NPC ${id} at position:`, position);
+        console.log(`Spawned new NPC ${id} (${npc.faction}) at position:`, position);
     }
 } 

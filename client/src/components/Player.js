@@ -6,11 +6,12 @@ export class Player {
     this.isLocal = isLocal;
     this.health = 100;
     this.isAlive = true;
+    this.character = null; // Store character data
     
     // Create mesh
     const geometry = new THREE.BoxGeometry(2, 2, 2);
     const material = new THREE.MeshStandardMaterial({
-      color: isLocal ? 0x00ff00 : 0xff0000
+      color: isLocal ? 0x00ff00 : 0xff0000 // Default colors before faction assignment
     });
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.position.y = 1;
@@ -66,15 +67,35 @@ export class Player {
     ctx.fillStyle = '#333333';
     ctx.fillRect(0, 0, width, height);
 
-    // Draw health
+    // Draw health with faction-specific color
     const healthWidth = (this.health / 100) * width;
-    ctx.fillStyle = this.health > 50 ? '#00ff00' : this.health > 25 ? '#ffff00' : '#ff0000';
+    
+    // Select color based on faction
+    let healthColor;
+    if (this.character) {
+      switch(this.character.faction) {
+        case "Criminal":
+          healthColor = '#ff5252'; // Light red
+          break;
+        case "Enforcer":
+          healthColor = '#64b5f6'; // Light blue
+          break;
+        case "Civilian":
+          healthColor = '#81c784'; // Light green
+          break;
+        default:
+          healthColor = this.health > 50 ? '#00ff00' : this.health > 25 ? '#ffff00' : '#ff0000';
+      }
+    } else {
+      healthColor = this.health > 50 ? '#00ff00' : this.health > 25 ? '#ffff00' : '#ff0000';
+    }
+    
+    ctx.fillStyle = healthColor;
     ctx.fillRect(0, 0, healthWidth, height);
 
     // Force texture update
     if (this.healthBarTexture) {
       this.healthBarTexture.needsUpdate = true;
-      // Update material to ensure texture refresh
       this.healthBar.material.needsUpdate = true;
     }
   }
@@ -91,6 +112,33 @@ export class Player {
     }
   }
 
+  getFactionColor() {
+    if (!this.character) return this.isLocal ? 0x00ff00 : 0xff0000;
+    
+    // Get colors based on faction
+    switch(this.character.faction) {
+      case "Criminal":
+        return this.isLocal ? 0x8b0000 : 0xd32f2f; // Dark red for local, bright red for remote
+      case "Enforcer":
+        return this.isLocal ? 0x00008b : 0x1976d2; // Dark blue for local, bright blue for remote
+      case "Civilian":
+        return this.isLocal ? 0x006400 : 0x388e3c; // Dark green for local, bright green for remote
+      default:
+        return this.isLocal ? 0x00ff00 : 0xff0000; // Default colors
+    }
+  }
+  
+  setFaction(faction) {
+    if (!this.character) this.character = {};
+    if (this.character.faction !== faction) {
+      this.character.faction = faction;
+      if (this.isAlive) {
+        this.mesh.material.color.setHex(this.getFactionColor());
+      }
+      this.updateHealthBar();
+    }
+  }
+
   takeDamage(damage) {
     this.health = Math.max(0, this.health - damage);
     this.isAlive = this.health > 0;
@@ -99,7 +147,11 @@ export class Player {
     // Update material color based on health and alive status
     if (!this.isAlive) {
       this.mesh.material.color.setHex(0x333333); // Grey when dead
+    } else if (this.character) {
+      // Use faction-based colors
+      this.mesh.material.color.setHex(this.getFactionColor());
     } else {
+      // Default colors if no character (shouldn't happen once character system is fully implemented)
       const healthFactor = this.health / 100;
       if (this.isLocal) {
         this.mesh.material.color.setRGB(0, healthFactor, 0); // Green varying with health
@@ -115,6 +167,19 @@ export class Player {
     this.health = Math.min(100, this.health + amount);
     this.isAlive = true;
     this.updateHealthBar();
+    
+    // Update color based on health and faction
+    if (this.character) {
+      this.mesh.material.color.setHex(this.getFactionColor());
+    } else {
+      // Default behavior
+      if (this.isLocal) {
+        this.mesh.material.color.setRGB(0, 1, 0); // Full green for local
+      } else {
+        this.mesh.material.color.setRGB(1, 0, 0); // Full red for remote
+      }
+    }
+    
     return this.health;
   }
 

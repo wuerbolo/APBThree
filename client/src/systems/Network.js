@@ -22,16 +22,36 @@ export class NetworkSystem {
   }
 
   setupSocketHandlers() {
-    this.socket.on('init', ({ id, position, players, npcs }) => {
+    this.socket.on('init', ({ id, position, players, npcs, character, hasCharacter }) => {
       console.log('Connected with ID:', id);
       
-      // Initialize local player
-      this.gameScene.initLocalPlayer(id, position);
+      // Check if player has a character
+      if (hasCharacter) {
+        // Initialize with existing character
+        console.log('Loaded existing character:', character);
+        this.gameScene.character = character;
+        this.gameScene.hud.showCharacterInfo(character);
+        
+        // Initialize local player
+        this.gameScene.initLocalPlayer(id, position);
+      } else {
+        // Needs to create a character first - show faction selection UI
+        console.log('No character found, showing faction selection');
+        this.gameScene.hud.showFactionSelection();
+        
+        // Still initialize local player to have the camera work properly
+        this.gameScene.initLocalPlayer(id, position);
+        
+        // Hide the player until character is created
+        if (this.gameScene.localPlayer) {
+          this.gameScene.localPlayer.mesh.visible = false;
+        }
+      }
       
       // Initialize other players
-      players.forEach(([playerId, pos]) => {
+      players.forEach(([playerId, pos, characterData]) => {
         if (playerId !== id) {
-          this.gameScene.addRemotePlayer(playerId, pos);
+          this.gameScene.addRemotePlayer(playerId, pos, characterData);
         }
       });
 
@@ -41,8 +61,23 @@ export class NetworkSystem {
       });
     });
 
-    this.socket.on('playerJoined', ({ id, position }) => {
-      this.gameScene.addRemotePlayer(id, position);
+    // Character updates
+    this.socket.on('characterUpdated', (characterData) => {
+      console.log('Character updated:', characterData);
+      this.gameScene.character = characterData;
+      this.gameScene.hud.showCharacterInfo(characterData);
+    });
+
+    this.socket.on('playerUpdated', ({ id, character }) => {
+      // Update remote player's character data
+      const remotePlayer = this.gameScene.remotePlayers.get(id);
+      if (remotePlayer) {
+        remotePlayer.character = character;
+      }
+    });
+
+    this.socket.on('playerJoined', ({ id, position, character }) => {
+      this.gameScene.addRemotePlayer(id, position, character);
     });
 
     this.socket.on('playerMoved', ({ id, position }) => {
@@ -66,9 +101,9 @@ export class NetworkSystem {
       }
     });
 
-    this.socket.on('spawnNPC', ({ id, position, health }) => {
-      console.log(`Spawning new NPC ${id} at position:`, position);
-      this.gameScene.addNPC(id, position);
+    this.socket.on('spawnNPC', ({ id, position, health, faction }) => {
+      console.log(`Spawning new NPC ${id} (${faction || 'Unknown faction'}) at position:`, position);
+      this.gameScene.addNPC(id, position, faction);
       // Update health if provided
       if (health) {
         const npc = this.gameScene.npcs.get(id);
@@ -84,9 +119,8 @@ export class NetworkSystem {
       this.gameScene.handleRemoteShot(id, position, direction);
     });
 
-    // Add health update handler
-    this.socket.on('updateHealth', ({ id, health, isAlive, isNPC }) => {
-      console.log(`Received health update: ${id} (${isNPC ? 'NPC' : 'Player'}) - Health: ${health}, Alive: ${isAlive}`);
+    this.socket.on('updateHealth', ({ id, health, isAlive, isNPC, faction }) => {
+      console.log(`Received health update: ${id} (${isNPC ? 'NPC' : 'Player'}) - Health: ${health}, Alive: ${isAlive}, Faction: ${faction || 'Unknown'}`);
       
       if (isNPC) {
         const npc = this.gameScene.npcs.get(id);
@@ -94,15 +128,17 @@ export class NetworkSystem {
           const oldHealth = npc.health;
           npc.health = health;
           npc.isAlive = isAlive;
+          
+          // Update faction if provided
+          if (faction && faction !== npc.faction) {
+            npc.setFaction(faction);
+          }
+          
           npc.updateHealthBar();
           console.log(`NPC ${id} health changed from ${oldHealth} to ${health}`);
-
-          // Update color based on alive status first
+          
           if (!isAlive) {
             npc.mesh.material.color.setHex(0x333333); // Grey when dead
-          } else {
-            const healthFactor = health / 50;
-            npc.mesh.material.color.setRGB(0, 0.533 * healthFactor + 0.267, healthFactor);
           }
         }
       } else {
@@ -141,6 +177,81 @@ export class NetworkSystem {
             }
           }
         }
+      }
+    });
+
+    // Handle damage rejection (friendly fire, etc.)
+    this.socket.on('damageRejected', ({ targetId, reason, message }) => {
+      console.log(`Damage rejected: ${message}`);
+      
+      // Show a visual feedback for rejected damage
+      if (reason === 'FRIENDLY_FIRE') {
+        this.showFriendlyFireIndicator(message);
+      }
+    });
+  }
+
+  // Display a temporary message for friendly fire
+  showFriendlyFireIndicator(message) {
+    // Create or reuse the element
+    let indicator = document.getElementById('friendly-fire-indicator');
+    if (!indicator) {
+      indicator = document.createElement('div');
+      indicator.id = 'friendly-fire-indicator';
+      indicator.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background-color: rgba(0, 0, 0, 0.7);
+        color: #ff0000;
+        padding: 15px 20px;
+        border-radius: 5px;
+        font-family: Arial, sans-serif;
+        font-size: 18px;
+        text-align: center;
+        pointer-events: none;
+        z-index: 1000;
+        transition: opacity 0.5s;
+      `;
+      document.body.appendChild(indicator);
+    }
+    
+    // Set the message
+    indicator.textContent = message;
+    indicator.style.opacity = '1';
+    
+    // Clear any existing timeout
+    if (this.friendlyFireTimeout) {
+      clearTimeout(this.friendlyFireTimeout);
+    }
+    
+    // Hide after 2 seconds
+    this.friendlyFireTimeout = setTimeout(() => {
+      indicator.style.opacity = '0';
+    }, 2000);
+  }
+
+  createCharacter(name, faction) {
+    console.log(`Creating character: ${name} (${faction})`);
+    this.socket.emit('createCharacter', { name, faction }, (response) => {
+      if (response.success) {
+        console.log('Character created successfully:', response.character);
+        
+        // Store character data in game scene
+        this.gameScene.character = response.character;
+        
+        // Show character info in HUD
+        this.gameScene.hud.showCharacterInfo(response.character);
+        
+        // Make local player visible
+        if (this.gameScene.localPlayer) {
+          this.gameScene.localPlayer.mesh.visible = true;
+        }
+      } else {
+        console.error('Failed to create character:', response.error);
+        // Show faction selection again with error
+        this.gameScene.hud.showFactionSelection();
       }
     });
   }

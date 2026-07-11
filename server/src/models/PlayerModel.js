@@ -4,6 +4,7 @@ export class PlayerModel {
     this.position = position;
     this.health = 100;
     this.isAlive = true;
+    this.character = null; // Will hold character data
   }
 
   updatePosition(position) {
@@ -32,5 +33,20 @@ export class PlayerModel {
       health: this.health,
       isAlive: this.isAlive
     };
+  }
+
+  // Set character data
+  setCharacter(character) {
+    this.character = character;
+  }
+
+  // Get character data
+  getCharacter() {
+    return this.character;
+  }
+
+  // Check if player has a character
+  hasCharacter() {
+    return this.character !== null;
   }
 } 

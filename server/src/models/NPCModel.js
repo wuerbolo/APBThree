@@ -1,5 +1,5 @@
 export class NPCModel {
-  constructor(id, position) {
+  constructor(id, position, faction = null) {
     this.id = id;
     this.position = position;
     this.targetPosition = this.getNewTargetPosition();
@@ -7,6 +7,21 @@ export class NPCModel {
     this.isAlive = true;
     this.speed = 0.2;
     this.despawnTimer = null;
+    
+    // Assign a faction if not provided
+    this.faction = faction || this.getRandomFaction();
+  }
+
+  // Random faction assignment - 60% chance of Civilian, 20% each for Criminal and Enforcer
+  getRandomFaction() {
+    const rand = Math.random();
+    if (rand < 0.6) {
+      return "Civilian";
+    } else if (rand < 0.8) {
+      return "Criminal";
+    } else {
+      return "Enforcer";
+    }
   }
 
   update() {
@@ -79,6 +94,17 @@ export class NPCModel {
     return {
       health: this.health,
       isAlive: this.isAlive
+    };
+  }
+  
+  // Get all NPC data including faction
+  getData() {
+    return {
+      id: this.id,
+      position: this.position,
+      health: this.health,
+      isAlive: this.isAlive,
+      faction: this.faction
     };
   }
 

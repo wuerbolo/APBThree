@@ -1,22 +1,38 @@
 import * as THREE from 'three';
 
 export class NPC {
-  constructor(id, position) {
+  constructor(id, position, faction = "Civilian") {
     this.id = id;
     this.health = 50;
     this.isAlive = true;
+    this.faction = faction; // Store faction information
     
     // Create mesh
     const geometry = new THREE.BoxGeometry(2, 2, 2);
-    const material = new THREE.MeshStandardMaterial({ color: 0x0088ff });
-    this.mesh = new THREE.Mesh(geometry, material);
     
-    // Set initial position
-    this.mesh.position.set(position.x, position.y, position.z);
-    this.targetPosition = new THREE.Vector3();
-
+    // Set color based on faction
+    const material = new THREE.MeshStandardMaterial({
+      color: this.getFactionColor()
+    });
+    
+    this.mesh = new THREE.Mesh(geometry, material);
+    this.mesh.position.copy(position);
+    
     // Create health bar
     this.createHealthBar();
+  }
+  
+  // Return the color for this NPC's faction
+  getFactionColor() {
+    switch(this.faction) {
+      case "Criminal":
+        return 0xd32f2f; // Red
+      case "Enforcer":
+        return 0x1976d2; // Blue
+      case "Civilian":
+      default:
+        return 0x388e3c; // Green
+    }
   }
 
   createHealthBar() {
@@ -57,21 +73,35 @@ export class NPC {
     ctx.fillStyle = '#333333';
     ctx.fillRect(0, 0, width, height);
 
-    // Draw health
-    const healthWidth = (this.health / 50) * width; // NPCs have max 50 health
-    ctx.fillStyle = this.health > 25 ? '#00ff00' : this.health > 12 ? '#ffff00' : '#ff0000';
+    // Draw health - use colors that match NPC's faction
+    const healthWidth = (this.health / 50) * width;  // NPCs have max 50 health
+    
+    // Get faction-based color
+    let healthColor;
+    switch(this.faction) {
+      case "Criminal":
+        healthColor = '#ff5252'; // Lighter red
+        break;
+      case "Enforcer":
+        healthColor = '#64b5f6'; // Lighter blue
+        break;
+      case "Civilian":
+      default:
+        healthColor = '#81c784'; // Lighter green
+        break;
+    }
+    
+    ctx.fillStyle = healthColor;
     ctx.fillRect(0, 0, healthWidth, height);
 
     // Force texture update
     if (this.healthBarTexture) {
       this.healthBarTexture.needsUpdate = true;
-      // Update material to ensure texture refresh
       this.healthBar.material.needsUpdate = true;
     }
   }
 
   updateHealthBarRotation(camera) {
-    // Make health bar face camera
     if (this.healthBarContainer) {
       const cameraPosition = camera.position.clone();
       this.healthBarContainer.lookAt(cameraPosition);
@@ -87,22 +117,36 @@ export class NPC {
     this.isAlive = this.health > 0;
     this.updateHealthBar();
 
-    // Update material color based on health
-    const healthFactor = this.health / 50;
-    const color = new THREE.Color(
-      0.0,
-      0.533 * healthFactor + 0.267,
-      1 * healthFactor
-    );
-    this.mesh.material.color = color;
+    if (!this.isAlive) {
+      this.mesh.material.color.setHex(0x333333); // Grey when dead
+    }
 
     return this.isAlive;
+  }
+  
+  // Update faction and related visuals
+  setFaction(faction) {
+    if (this.faction !== faction) {
+      this.faction = faction;
+      if (this.isAlive) {
+        this.mesh.material.color.setHex(this.getFactionColor());
+      }
+      this.updateHealthBar();
+    }
+  }
+
+  setPosition(position) {
+    this.mesh.position.copy(position);
   }
 
   heal(amount) {
     this.health = Math.min(50, this.health + amount);
     this.isAlive = true;
     this.updateHealthBar();
+    
+    // Update color based on health and faction
+    this.mesh.material.color.setHex(this.getFactionColor());
+    
     return this.health;
   }
 
