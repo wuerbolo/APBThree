@@ -8,7 +8,7 @@ export class NetworkSystem {
   constructor(server) {
     this.io = new Server(server, {
       cors: {
-        origin: "http://localhost:5173",
+        origin: process.env.CLIENT_ORIGIN || "http://localhost:5173",
         methods: ["GET", "POST"]
       }
     });

@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    image: apb-three:latest
+    container_name: apb-three
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:5173}
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.apb-three.rule=Host(`${DOMAIN:-apb.wuerbo.com}`)
+      - traefik.http.routers.apb-three.entrypoints=websecure
+      - traefik.http.routers.apb-three.tls.certresolver=letsencrypt
+      - traefik.http.services.apb-three.loadbalancer.server.port=3000
+
+networks:
+  proxy:
+    external: true

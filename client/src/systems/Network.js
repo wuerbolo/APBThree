@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 export class NetworkSystem {
   constructor(gameScene) {
     this.gameScene = gameScene;
-    this.socket = io('http://localhost:3000');
+    this.socket = io(import.meta.env.VITE_SERVER_URL || undefined);
     
     // Add connection monitoring
     this.socket.on('connect', () => {

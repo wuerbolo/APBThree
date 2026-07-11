@@ -15,8 +15,8 @@ const server = createServer(app);
 // Initialize networking
 const network = new NetworkSystem(server);
 
-// Serve static files from the dist directory after building
-app.use(express.static('dist'));
+// Serve the built client (see client/vite.config.js outDir)
+app.use(express.static(path.join(__dirname, '../client/dist')));
 
 // Start server
 const PORT = process.env.PORT || 3000;
