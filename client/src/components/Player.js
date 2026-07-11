@@ -26,8 +26,36 @@ export class Player {
     this.moveSpeed = 0.5;
     this.moveVector = new THREE.Vector3();
 
+    // Jumping
+    this.groundY = 1;
+    this.velocityY = 0;
+    this.isJumping = false;
+    this.jumpSpeed = 0.28;
+    this.gravity = 0.015;
+
     // Create health bar
     this.createHealthBar();
+
+    // Create gun
+    this.createGun();
+  }
+
+  createGun() {
+    const gunGroup = new THREE.Group();
+    const gunMaterial = new THREE.MeshStandardMaterial({ color: 0x222222 });
+
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.5), gunMaterial);
+    gunGroup.add(body);
+
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.4), gunMaterial);
+    barrel.position.z = -0.4;
+    gunGroup.add(barrel);
+
+    // Held out to the side and slightly forward, like a raised arm
+    gunGroup.position.set(0.7, 0.1, -0.5);
+
+    this.gun = gunGroup;
+    this.mesh.add(this.gun);
   }
 
   createHealthBar() {
@@ -224,6 +252,15 @@ export class Player {
     // Push back out of any building we just walked into
     resolveBuildingCollision(this.mesh.position);
 
+    // Jump / gravity
+    this.velocityY -= this.gravity;
+    this.mesh.position.y += this.velocityY;
+    if (this.mesh.position.y <= this.groundY) {
+      this.mesh.position.y = this.groundY;
+      this.velocityY = 0;
+      this.isJumping = false;
+    }
+
     // Update health bar to face camera
     this.updateHealthBarRotation(camera);
   }
@@ -244,6 +281,10 @@ export class Player {
     if (this.keys.hasOwnProperty(event.key)) {
       this.keys[event.key] = true;
     }
+    if (event.key === ' ' && !this.isJumping) {
+      this.velocityY = this.jumpSpeed;
+      this.isJumping = true;
+    }
   }
 
   handleKeyUp(event) {
@@ -260,8 +301,10 @@ export class Player {
     // Generate random spawn position
     const x = Math.random() * 80 - 40; // -40 to 40
     const z = Math.random() * 80 - 40; // -40 to 40
-    this.mesh.position.set(x, 1, z);
-    
+    this.mesh.position.set(x, this.groundY, z);
+    this.velocityY = 0;
+    this.isJumping = false;
+
     // Reset material color to full health color based on player type
     if (this.isLocal) {
       this.mesh.material.color.setRGB(0, 1, 0); // Full green for local player

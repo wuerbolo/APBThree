@@ -41,6 +41,12 @@ export class GameScene {
 
   setupScene() {
     this.scene = new THREE.Scene();
+    const skyColor = 0x87ceeb;
+    this.scene.background = new THREE.Color(skyColor);
+    // Fades the ground's edge into the sky color instead of cutting off
+    // into a black void once you're near the 100-unit world boundary.
+    this.scene.fog = new THREE.Fog(skyColor, 60, 150);
+
     this.renderer = new THREE.WebGLRenderer();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(this.renderer.domElement);
