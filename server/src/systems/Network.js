@@ -2,7 +2,14 @@ import { Server } from 'socket.io';
 import { PlayerModel } from '../models/PlayerModel.js';
 import { NPCSpawner } from './NPCSpawner.js';
 import { CharacterSystem } from './CharacterSystem.js';
+import { RateLimiter } from '../utils/RateLimiter.js';
 import * as THREE from 'three';
+
+function getClientIp(socket) {
+  const forwarded = socket.handshake.headers['x-forwarded-for'];
+  if (forwarded) return forwarded.split(',')[0].trim();
+  return socket.handshake.address;
+}
 
 export class NetworkSystem {
   constructor(server) {
@@ -15,7 +22,14 @@ export class NetworkSystem {
 
     this.players = new Map();
     this.npcs = new Map();
-    
+
+    // Per-socket sliding-window limits on the noisiest events. A normal
+    // player's input loop stays well under these; a script hammering the
+    // server won't.
+    this.positionLimiter = new RateLimiter(60, 1000);
+    this.shootLimiter = new RateLimiter(10, 1000);
+    this.damageLimiter = new RateLimiter(15, 1000);
+
     // Initialize character system
     this.characterSystem = new CharacterSystem();
     
@@ -30,7 +44,8 @@ export class NetworkSystem {
     console.log('Setting up socket handlers...');
     
     this.io.on('connection', (socket) => {
-      console.log('Player connected:', socket.id);
+      const clientIp = getClientIp(socket);
+      console.log(`Player connected: ${socket.id} from ${clientIp}`);
 
       // Assign initial position
       const isFirstPlayer = this.players.size === 0;
@@ -122,6 +137,11 @@ export class NetworkSystem {
 
       // Handle position updates
       socket.on('updatePosition', (position) => {
+        if (!this.positionLimiter.allow(socket.id)) {
+          console.warn(`Rate limit exceeded (updatePosition) for ${socket.id} (${clientIp}), disconnecting`);
+          socket.disconnect(true);
+          return;
+        }
         const player = this.players.get(socket.id);
         if (player) {
           player.updatePosition(position);
@@ -134,6 +154,11 @@ export class NetworkSystem {
 
       // Handle shooting
       socket.on('shoot', (data) => {
+        if (!this.shootLimiter.allow(socket.id)) {
+          console.warn(`Rate limit exceeded (shoot) for ${socket.id} (${clientIp}), disconnecting`);
+          socket.disconnect(true);
+          return;
+        }
         socket.broadcast.emit('shoot', {
           ...data,
           playerId: socket.id
@@ -142,8 +167,13 @@ export class NetworkSystem {
 
       // Handle damage events
       socket.on('damage', (data, callback) => {
+        if (!this.damageLimiter.allow(socket.id)) {
+          console.warn(`Rate limit exceeded (damage) for ${socket.id} (${clientIp}), disconnecting`);
+          socket.disconnect(true);
+          return;
+        }
         console.log('Received damage event:', data);
-        
+
         // Send acknowledgment immediately
         if (callback) callback({ received: true });
         
@@ -323,10 +353,13 @@ export class NetworkSystem {
 
       // Handle disconnection
       socket.on('disconnect', () => {
-        console.log('Player disconnected:', socket.id);
+        console.log(`Player disconnected: ${socket.id} from ${clientIp}`);
         // Keep character data in memory but remove player
         this.players.delete(socket.id);
         this.io.emit('playerLeft', socket.id);
+        this.positionLimiter.clear(socket.id);
+        this.shootLimiter.clear(socket.id);
+        this.damageLimiter.clear(socket.id);
       });
     });
   }

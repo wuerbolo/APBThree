@@ -257,6 +257,9 @@ export class NetworkSystem {
   }
 
   sendPosition(position) {
+    const now = Date.now();
+    if (this._lastPositionSend && now - this._lastPositionSend < 50) return;
+    this._lastPositionSend = now;
     this.socket.emit('updatePosition', position);
   }
 
