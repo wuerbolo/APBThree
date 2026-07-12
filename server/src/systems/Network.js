@@ -212,63 +212,50 @@ export class NetworkSystem {
           
           // Get the NPC's faction
           const npcFaction = npc.faction;
-          
-          // Check faction rules:
-          // 1. If NPC is Civilian, damage is allowed
-          // 2. If player and NPC have the same faction, no damage (friendly fire disabled)
-          if (npcFaction === "Civilian" || npcFaction !== attackerFaction) {
-            // Damage is allowed
-            npc.takeDamage(amount);
-            console.log(`NPC ${targetId} (${npcFaction}) took ${amount} damage from ${socket.id} (${attackerFaction}). Health: ${npc.health}`);
-            
-            const isAlive = npc.health > 0;
-            
-            // Broadcast damage to all clients
-            this.io.emit('updateHealth', {
-              id: targetId,
-              health: npc.health,
-              isAlive: isAlive,
-              isNPC: true,
-              faction: npcFaction
-            });
-            
-            // If NPC died, handle it
-            if (!isAlive) {
-              console.log(`NPC ${targetId} died!`);
-              this.npcSpawner.onNPCDeath(targetId);
 
-              const playerWhoKilled = attacker;
-              if (playerWhoKilled.hasCharacter()) {
-                const character = playerWhoKilled.getCharacter();
-                let changed = false;
+          // Anyone can damage any NPC, own faction included -- no NPC
+          // friendly fire.
+          npc.takeDamage(amount);
+          console.log(`NPC ${targetId} (${npcFaction}) took ${amount} damage from ${socket.id} (${attackerFaction}). Health: ${npc.health}`);
 
-                if (npcFaction === "Civilian") {
-                  // Civilians drop cash on the ground instead of paying out instantly
-                  this.spawnMoneyPickup(npc.position, 10);
-                } else {
-                  character.money += 10; // Award 10 money per kill
-                  changed = true;
-                }
+          const isAlive = npc.health > 0;
 
-                // Reputation only for putting down a rival-faction NPC --
-                // Civilians are neutral and don't count.
-                if (npcFaction !== "Civilian" && npcFaction !== attackerFaction) {
-                  character.reputation += 10;
-                  character.updateLevel();
-                  changed = true;
-                }
+          // Broadcast damage to all clients
+          this.io.emit('updateHealth', {
+            id: targetId,
+            health: npc.health,
+            isAlive: isAlive,
+            isNPC: true,
+            faction: npcFaction
+          });
 
-                if (changed) socket.emit('characterUpdated', character.getData());
+          // If NPC died, handle it
+          if (!isAlive) {
+            console.log(`NPC ${targetId} died!`);
+
+            const playerWhoKilled = attacker;
+            if (playerWhoKilled.hasCharacter()) {
+              const character = playerWhoKilled.getCharacter();
+              let changed = false;
+
+              if (npcFaction === "Civilian") {
+                // Civilians drop cash on the ground instead of paying out instantly
+                this.spawnMoneyPickup(npc.position, 10);
+              } else {
+                character.money += 10; // Award 10 money per kill
+                changed = true;
               }
+
+              // Reputation only for putting down a rival-faction NPC --
+              // Civilians are neutral and don't count.
+              if (npcFaction !== "Civilian" && npcFaction !== attackerFaction) {
+                character.reputation += 10;
+                character.updateLevel();
+                changed = true;
+              }
+
+              if (changed) socket.emit('characterUpdated', character.getData());
             }
-          } else {
-            // Friendly fire - no damage applied
-            console.log(`Friendly fire prevented: ${socket.id} (${attackerFaction}) cannot damage NPC ${targetId} (${npcFaction})`);
-            socket.emit('damageRejected', { 
-              targetId, 
-              reason: 'FRIENDLY_FIRE',
-              message: 'Cannot damage NPCs of your own faction'
-            });
           }
         } else {
           // Player attacking Player
@@ -426,11 +413,20 @@ export class NetworkSystem {
     });
   }
 
-  // Cash dropped by a killed Civilian, collected by walking over it.
+  // Cash dropped by a killed Civilian, collected by walking over it. Offset
+  // from the death spot so it doesn't spawn invisibly under the corpse.
   spawnMoneyPickup(position, amount) {
+    const angle = Math.random() * Math.PI * 2;
+    const distance = 1.5 + Math.random() * 1.5;
+    const dropPosition = {
+      x: position.x + Math.cos(angle) * distance,
+      y: position.y,
+      z: position.z + Math.sin(angle) * distance
+    };
+
     const id = `pickup-${Date.now()}-${this.nextPickupSequence++}`;
-    this.moneyPickups.set(id, { position, amount });
-    this.io.emit('spawnMoneyPickup', { id, position, amount });
+    this.moneyPickups.set(id, { position: dropPosition, amount });
+    this.io.emit('spawnMoneyPickup', { id, position: dropPosition, amount });
   }
 
   startNPCLoop() {
@@ -516,7 +512,6 @@ export class NetworkSystem {
 
     if (!targetNpc.isAlive) {
       console.log(`NPC ${targetNpcId} was killed by NPC ${attackerId}!`);
-      this.npcSpawner.onNPCDeath(targetNpcId);
     }
   }
 } 

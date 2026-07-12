@@ -1,60 +1,58 @@
-import { NPCModel, randomNPCFaction } from '../models/NPCModel.js';
+import { NPCModel } from '../models/NPCModel.js';
 import { getSpawnPositionForFaction } from '../utils/collision.js';
 
+// Always at least this many of each faction alive, NPCs and players
+// combined (Civilians have no player equivalent, so it's NPC-only for them).
+const MIN_PER_FACTION = { Civilian: 3, Criminal: 3, Enforcer: 3 };
+
 export class NPCSpawner {
-    constructor(networkSystem, targetPopulation = 5) {
+    constructor(networkSystem) {
         this.networkSystem = networkSystem;
-        this.targetPopulation = targetPopulation;
-        this.respawnQueue = [];
         // Date.now() alone isn't unique enough -- multiple NPCs spawning in
         // the same millisecond (e.g. the initial population burst) would
         // collide and silently overwrite each other in this.networkSystem.npcs.
         this.nextNpcSequence = 0;
 
-        // Start queue check interval
-        setInterval(this.checkQueue.bind(this), 1000);
+        // Every second, top off whichever faction(s) are under their
+        // minimum -- covers NPC deaths, and players joining/leaving/dying.
+        setInterval(() => this.fillDeficits(), 1000);
 
-        // Initial spawn
-        this.spawnInitialNPCs();
+        this.fillDeficits();
     }
 
-    spawnInitialNPCs() {
-        const currentCount = this.networkSystem.npcs.size;
-        for (let i = currentCount; i < this.targetPopulation; i++) {
-            this.spawnNPC();
-        }
-    }
-
-    onNPCDeath(npcId) {
-        // Queue respawn in 10-30 seconds
-        const respawnTime = Date.now() + (Math.random() * 20000) + 10000;
-        this.respawnQueue.push({ id: npcId, time: respawnTime });
-        console.log(`NPC ${npcId} queued for respawn at ${new Date(respawnTime).toLocaleTimeString()}`);
-    }
-
-    checkQueue() {
-        const now = Date.now();
-        const currentPopulation = this.networkSystem.npcs.size;
-
-        // Process queue
-        this.respawnQueue = this.respawnQueue.filter(entry => {
-            if (now >= entry.time && currentPopulation < this.targetPopulation) {
-                this.spawnNPC();
-                return false;
+    countAlivePlayersByFaction() {
+        const counts = { Criminal: 0, Enforcer: 0 };
+        this.networkSystem.players.forEach(player => {
+            if (player.isAlive && player.hasCharacter()) {
+                const faction = player.getCharacter().faction;
+                if (counts[faction] !== undefined) counts[faction]++;
             }
-            return true;
         });
+        return counts;
+    }
 
-        // Spawn additional NPCs if population is low
-        if (currentPopulation < this.targetPopulation && this.respawnQueue.length === 0) {
-            this.spawnNPC();
+    countAliveNPCsByFaction() {
+        const counts = { Civilian: 0, Criminal: 0, Enforcer: 0 };
+        this.networkSystem.npcs.forEach(npc => {
+            if (npc.isAlive && counts[npc.faction] !== undefined) counts[npc.faction]++;
+        });
+        return counts;
+    }
+
+    fillDeficits() {
+        const playerCounts = this.countAlivePlayersByFaction();
+        const npcCounts = this.countAliveNPCsByFaction();
+
+        for (const faction of Object.keys(MIN_PER_FACTION)) {
+            const total = npcCounts[faction] + (playerCounts[faction] || 0);
+            const deficit = MIN_PER_FACTION[faction] - total;
+            for (let i = 0; i < deficit; i++) this.spawnNPC(faction);
         }
     }
 
-    spawnNPC() {
-        // Faction has to be picked before the position: Enforcers spawn at
-        // their HQ, everyone else spawns anywhere on the open map.
-        const faction = randomNPCFaction();
+    spawnNPC(faction) {
+        // Enforcers spawn at their HQ, everyone else spawns anywhere on the
+        // open map.
         const position = getSpawnPositionForFaction(faction);
 
         // Date.now() + an incrementing sequence -- guarantees uniqueness
@@ -62,20 +60,15 @@ export class NPCSpawner {
         const id = `npc-${Date.now()}-${this.nextNpcSequence++}`;
 
         const npc = new NPCModel(id, position, faction);
-        
-        // Set up despawn callback
+
         npc.setDespawnCallback((npcId) => {
             console.log(`NPC ${npcId} despawned after death`);
             this.networkSystem.npcs.delete(npcId);
             this.networkSystem.io.emit('removeNPC', npcId);
-            // Queue for respawn
-            this.onNPCDeath(npcId);
         });
 
-        // Add to network system
         this.networkSystem.npcs.set(id, npc);
-        
-        // Notify clients
+
         this.networkSystem.io.emit('spawnNPC', {
             id,
             position,
@@ -85,4 +78,4 @@ export class NPCSpawner {
 
         console.log(`Spawned new NPC ${id} (${npc.faction}) at position:`, position);
     }
-} 
+}

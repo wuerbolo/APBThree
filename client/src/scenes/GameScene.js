@@ -118,16 +118,24 @@ export class GameScene {
   }
 
   // A billboard sprite so labels like "STORE" stay readable from both
-  // first-person and top-down camera modes.
+  // first-person and top-down camera modes. Canvas is sized to the text
+  // itself so longer labels ("ENFORCER HQ") don't get clipped.
   createBuildingLabel(text) {
+    const font = 'bold 40px Arial';
+    const paddingX = 24;
+
+    const measureCtx = document.createElement('canvas').getContext('2d');
+    measureCtx.font = font;
+    const textWidth = measureCtx.measureText(text).width;
+
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 64;
+    canvas.width = Math.ceil(textWidth) + paddingX * 2;
+    canvas.height = 90;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 40px Arial';
+    ctx.font = font;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(text, canvas.width / 2, canvas.height / 2);
@@ -135,7 +143,8 @@ export class GameScene {
     const texture = new THREE.CanvasTexture(canvas);
     const material = new THREE.SpriteMaterial({ map: texture, depthTest: false });
     const sprite = new THREE.Sprite(material);
-    sprite.scale.set(10, 2.5, 1);
+    const spriteHeight = 3;
+    sprite.scale.set(spriteHeight * (canvas.width / canvas.height), spriteHeight, 1);
     return sprite;
   }
 
@@ -284,20 +293,22 @@ export class GameScene {
     }
   }
 
-  // Cash dropped by a killed Civilian -- walk over it to collect.
+  // Cash dropped by a killed Civilian -- walk over it to collect. Bounces
+  // gently in place so it's easy to spot on the ground.
   addMoneyPickup(id, position) {
     const geometry = new THREE.BoxGeometry(0.6, 0.3, 0.9);
     const material = new THREE.MeshStandardMaterial({ color: 0x4caf50 });
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(position.x, 0.3, position.z);
+    const baseY = 0.3;
+    mesh.position.set(position.x, baseY, position.z);
     this.scene.add(mesh);
-    this.moneyPickups.set(id, mesh);
+    this.moneyPickups.set(id, { mesh, baseY, spawnTime: Date.now() });
   }
 
   removeMoneyPickup(id) {
-    const mesh = this.moneyPickups.get(id);
-    if (mesh) {
-      this.scene.remove(mesh);
+    const pickup = this.moneyPickups.get(id);
+    if (pickup) {
+      this.scene.remove(pickup.mesh);
       this.moneyPickups.delete(id);
     }
   }
@@ -449,16 +460,22 @@ export class GameScene {
       });
     });
 
-    // Collect any money pickup the local player is standing on
-    if (this.localPlayer) {
-      const collectRadius = 2;
-      this.moneyPickups.forEach((mesh, id) => {
-        if (this.localPlayer.mesh.position.distanceTo(mesh.position) < collectRadius) {
+    // Animate and collect money pickups
+    this.moneyPickups.forEach((pickup, id) => {
+      const elapsed = (Date.now() - pickup.spawnTime) / 1000;
+      pickup.mesh.position.y = pickup.baseY + Math.abs(Math.sin(elapsed * 3)) * 0.35;
+      pickup.mesh.rotation.y += 0.03;
+
+      if (this.localPlayer) {
+        const collectRadius = 2;
+        const dx = this.localPlayer.mesh.position.x - pickup.mesh.position.x;
+        const dz = this.localPlayer.mesh.position.z - pickup.mesh.position.z;
+        if (Math.sqrt(dx * dx + dz * dz) < collectRadius) {
           this.network.socket.emit('collectMoney', id);
           this.removeMoneyPickup(id);
         }
-      });
-    }
+      }
+    });
 
     // Update camera
     if (this.localPlayer) {
