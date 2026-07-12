@@ -3,7 +3,14 @@ import { Player } from '../components/Player';
 import { NPC } from '../components/NPC';
 import { NetworkSystem } from '../systems/Network';
 import { HUD } from '../systems/HUD.js';
-import { BUILDINGS, PLAZA, WORLD_SIZE } from '../utils/collision.js';
+import { BUILDINGS, PLAZA, WORLD_SIZE, WORLD_HALF } from '../utils/collision.js';
+import { sound } from '../utils/sound.js';
+
+// Client-side weapon behavior; prices/ownership are validated server-side.
+const WEAPONS = {
+  pistol: { damage: 10, cooldown: 250, pellets: 1, spread: 0 },
+  shotgun: { damage: 4, cooldown: 800, pellets: 6, spread: 0.09 }
+};
 
 export class GameScene {
   constructor() {
@@ -23,6 +30,14 @@ export class GameScene {
     // Camera shake, triggered by triggerHitFeedback()
     this.shakeUntil = 0;
     this.SHAKE_DURATION = 300;
+
+    // Weapons
+    this.currentWeapon = 'pistol';
+    this.lastShotTime = 0;
+
+    // STORE building, for shop proximity checks
+    this.storeBuilding = BUILDINGS.find(b => b.label === 'STORE');
+    this.nearStore = false;
     
     // Camera controls
     this.cameraMode = 'firstPerson';
@@ -66,14 +81,64 @@ export class GameScene {
       0.1,
       1000
     );
+    // Camera must be in the scene graph for its children (the first-person
+    // weapon viewmodel) to render.
+    this.scene.add(this.camera);
+    this.setupViewmodels();
+  }
+
+  // First-person weapon models parented to the camera, bottom-right of the
+  // view, classic FPS style. Only one is visible at a time.
+  setupViewmodels() {
+    const gunMaterial = new THREE.MeshStandardMaterial({ color: 0x2a2a2a });
+    const woodMaterial = new THREE.MeshStandardMaterial({ color: 0x6d4c33 });
+
+    const pistol = new THREE.Group();
+    const pBody = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 0.4), gunMaterial);
+    const pBarrel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.3), gunMaterial);
+    pBarrel.position.set(0, 0.05, -0.3);
+    const pGrip = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.22, 0.14), woodMaterial);
+    pGrip.position.set(0, -0.17, 0.12);
+    pGrip.rotation.x = 0.3;
+    pistol.add(pBody, pBarrel, pGrip);
+    pistol.position.set(0.45, -0.4, -0.9);
+
+    const shotgun = new THREE.Group();
+    const sBody = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 0.55), gunMaterial);
+    const sBarrelL = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.6), gunMaterial);
+    sBarrelL.position.set(-0.045, 0.05, -0.5);
+    const sBarrelR = sBarrelL.clone();
+    sBarrelR.position.x = 0.045;
+    const sStock = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.18, 0.35), woodMaterial);
+    sStock.position.set(0, -0.06, 0.4);
+    sStock.rotation.x = 0.15;
+    shotgun.add(sBody, sBarrelL, sBarrelR, sStock);
+    shotgun.position.set(0.45, -0.42, -0.85);
+    shotgun.visible = false;
+
+    this.camera.add(pistol, shotgun);
+    this.viewmodels = { pistol, shotgun };
+  }
+
+  // Keep the viewmodel/crosshair in sync with camera mode, equipped weapon
+  // and alive state. Called every frame; cheap (just visibility flags).
+  updateViewmodel() {
+    const inFirstPerson = this.cameraMode === 'firstPerson'
+      && this.isLocalPlayerAlive()
+      && this.localPlayer.mesh.visible;
+    this.viewmodels.pistol.visible = inFirstPerson && this.currentWeapon === 'pistol';
+    this.viewmodels.shotgun.visible = inFirstPerson && this.currentWeapon === 'shotgun';
+    this.hud.setCrosshairVisible(inFirstPerson);
   }
 
   setupLights() {
-    const ambientLight = new THREE.AmbientLight(0x404040);
-    this.scene.add(ambientLight);
+    // Hemisphere light (sky tint from above, ground bounce from below)
+    // reads much better than flat ambient for the same cost.
+    const hemiLight = new THREE.HemisphereLight(0xcfe5f0, 0x8a8577, 0.85);
+    this.scene.add(hemiLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-    directionalLight.position.set(5, 5, 5);
+    const directionalLight = new THREE.DirectionalLight(0xfff2d9, 0.9);
+    directionalLight.position.set(40, 80, 20);
     this.scene.add(directionalLight);
   }
 
@@ -114,6 +179,114 @@ export class GameScene {
         label.position.set(building.x, building.height + 3, building.z);
         this.scene.add(label);
       }
+    });
+
+    this.setupProps();
+  }
+
+  // Low-poly street dressing: roads, trees, benches, trash cans. All props
+  // share geometries/materials (clone() reuses them), and the whole set is
+  // a few dozen meshes total -- cheap enough that instancing isn't worth
+  // the complexity yet. Props have no collision on purpose: trunks are
+  // thin, and per-prop AABBs would complicate NPC pathing for little gain.
+  setupProps() {
+    // Roads: one east-west through the center, one north-south past the
+    // STORE. Thin boxes slightly above the ground to avoid z-fighting.
+    const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x4f4f52 });
+    const roadEW = new THREE.Mesh(new THREE.BoxGeometry(WORLD_SIZE, 0.06, 8), roadMaterial);
+    roadEW.position.set(0, 0.03, 0);
+    this.scene.add(roadEW);
+    const roadNS = new THREE.Mesh(new THREE.BoxGeometry(8, 0.06, WORLD_SIZE), roadMaterial);
+    roadNS.position.set(20, 0.03, 0);
+    this.scene.add(roadNS);
+
+    // Tree template
+    const trunkGeometry = new THREE.CylinderGeometry(0.25, 0.35, 2, 6);
+    const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x6d4c33 });
+    const leavesGeometry = new THREE.IcosahedronGeometry(1.5, 0);
+    const leavesMaterial = new THREE.MeshStandardMaterial({ color: 0x4a7c3f, flatShading: true });
+    const treeTemplate = new THREE.Group();
+    const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+    trunk.position.y = 1;
+    const leaves = new THREE.Mesh(leavesGeometry, leavesMaterial);
+    leaves.position.y = 2.8;
+    treeTemplate.add(trunk, leaves);
+
+    // Deterministic placement (seeded PRNG) so every client renders the
+    // same map, skipping roads, plaza and building footprints.
+    let seed = 1337;
+    const rand = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    const isClear = (x, z) => {
+      if (Math.abs(z) < 7) return false;
+      if (Math.abs(x - 20) < 7) return false;
+      if (Math.abs(x - PLAZA.x) < 15 && Math.abs(z - PLAZA.z) < 15) return false;
+      for (const b of BUILDINGS) {
+        if (Math.abs(x - b.x) < b.halfWidth + 4 && Math.abs(z - b.z) < b.halfDepth + 4) return false;
+      }
+      return true;
+    };
+
+    let placed = 0;
+    let attempts = 0;
+    while (placed < 30 && attempts < 400) {
+      attempts++;
+      const x = rand() * (WORLD_SIZE - 10) - (WORLD_HALF - 5);
+      const z = rand() * (WORLD_SIZE - 10) - (WORLD_HALF - 5);
+      if (!isClear(x, z)) continue;
+      const tree = treeTemplate.clone();
+      const scale = 0.8 + rand() * 0.6;
+      tree.scale.setScalar(scale);
+      tree.position.set(x, 0, z);
+      tree.rotation.y = rand() * Math.PI * 2;
+      this.scene.add(tree);
+      placed++;
+    }
+
+    // Bench template: seat, backrest, leg slab
+    const benchWood = new THREE.MeshStandardMaterial({ color: 0x8a6642 });
+    const benchTemplate = new THREE.Group();
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.12, 0.7), benchWood);
+    seat.position.y = 0.55;
+    const back = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.5, 0.1), benchWood);
+    back.position.set(0, 0.95, -0.3);
+    const legs = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.55, 0.5), new THREE.MeshStandardMaterial({ color: 0x3c3c3c }));
+    legs.position.y = 0.27;
+    benchTemplate.add(seat, back, legs);
+
+    // Four benches around the plaza facing the monument
+    const benchSpots = [
+      { x: PLAZA.x, z: PLAZA.z - 10, ry: Math.PI },
+      { x: PLAZA.x, z: PLAZA.z + 10, ry: 0 },
+      { x: PLAZA.x - 10, z: PLAZA.z, ry: -Math.PI / 2 },
+      { x: PLAZA.x + 10, z: PLAZA.z, ry: Math.PI / 2 }
+    ];
+    benchSpots.forEach(spot => {
+      const bench = benchTemplate.clone();
+      bench.position.set(spot.x, 0, spot.z);
+      bench.rotation.y = spot.ry;
+      this.scene.add(bench);
+    });
+
+    // Trash cans near points of interest. (Look the STORE up locally --
+    // setupProps runs from the constructor before this.storeBuilding is set.)
+    const store = BUILDINGS.find(b => b.label === 'STORE');
+    const trashGeometry = new THREE.CylinderGeometry(0.45, 0.4, 1.1, 8);
+    const trashMaterial = new THREE.MeshStandardMaterial({ color: 0x3d5245 });
+    const trashSpots = [
+      { x: store.x + 8, z: store.z },
+      { x: PLAZA.x - 11, z: PLAZA.z - 11 },
+      { x: PLAZA.x + 11, z: PLAZA.z + 11 },
+      { x: -70, z: -50 },
+      { x: 26, z: 10 },
+      { x: 14, z: -12 }
+    ];
+    trashSpots.forEach(spot => {
+      const trash = new THREE.Mesh(trashGeometry, trashMaterial);
+      trash.position.set(spot.x, 0.55, spot.z);
+      this.scene.add(trash);
     });
   }
 
@@ -180,6 +353,17 @@ export class GameScene {
           document.exitPointerLock();
         }
       }
+      // Weapon switching
+      if (event.key === '1') this.equipWeapon('pistol');
+      if (event.key === '2') this.equipWeapon('shotgun');
+      // Shop (only near the STORE)
+      if ((event.key === 'e' || event.key === 'E') && this.isLocalPlayerAlive()) {
+        if (this.hud.isShopOpen()) {
+          this.hud.closeShop();
+        } else if (this.nearStore) {
+          this.hud.openShop(this.character);
+        }
+      }
     });
 
     window.addEventListener('keyup', (event) => {
@@ -214,41 +398,87 @@ export class GameScene {
     return !!this.localPlayer && this.localPlayer.isAlive;
   }
 
+  // Shared tracer assets -- one geometry/material for every bullet in the
+  // scene instead of allocating new ones per shot.
+  static TRACER_GEOMETRY = new THREE.BoxGeometry(0.07, 0.07, 0.6);
+  static TRACER_MATERIAL = new THREE.MeshBasicMaterial({ color: 0xffd54a });
+
+  createTracerMesh(position, direction) {
+    const mesh = new THREE.Mesh(GameScene.TRACER_GEOMETRY, GameScene.TRACER_MATERIAL);
+    mesh.position.copy(position);
+    // Align the elongated axis with the flight direction
+    mesh.lookAt(position.x + direction.x, position.y + direction.y, position.z + direction.z);
+    mesh.direction = direction;
+    mesh.createdAt = Date.now();
+    return mesh;
+  }
+
+  equipWeapon(weaponId) {
+    if (!this.isLocalPlayerAlive()) return;
+    if (!WEAPONS[weaponId]) return;
+    if (weaponId !== 'pistol') {
+      const owned = this.character && Array.isArray(this.character.weapons)
+        && this.character.weapons.includes(weaponId);
+      if (!owned) return;
+    }
+    this.currentWeapon = weaponId;
+    this.hud.updateWeaponStat(weaponId);
+  }
+
   handleShot(event) {
     if (event.button !== 0) return; // Left click only
     if (!this.isLocalPlayerAlive()) return;
+    if (this.hud.isShopOpen()) return;
 
-    const projectile = {
-      geometry: new THREE.SphereGeometry(0.2, 8, 8),
-      material: new THREE.MeshBasicMaterial({ color: 0xff0000 }),
-      speed: 1,
-      lifetime: 3000
-    };
+    const weapon = WEAPONS[this.currentWeapon];
+    const now = Date.now();
+    if (now - this.lastShotTime < weapon.cooldown) return;
+    this.lastShotTime = now;
 
-    const mesh = new THREE.Mesh(projectile.geometry, projectile.material);
-    let direction;
-
+    let baseDirection;
     if (this.cameraMode === 'firstPerson') {
-      direction = new THREE.Vector3(0, 0, -1);
-      direction.applyQuaternion(this.camera.quaternion);
+      baseDirection = new THREE.Vector3(0, 0, -1);
+      baseDirection.applyQuaternion(this.camera.quaternion);
     } else {
-      direction = new THREE.Vector3(0, -0.5, -1);
-      direction.normalize();
+      baseDirection = new THREE.Vector3(0, -0.5, -1);
+      baseDirection.normalize();
     }
 
-    mesh.position.copy(this.localPlayer.mesh.position).add(new THREE.Vector3(0, 1.5, 0));
-    mesh.direction = direction;
-    mesh.createdAt = Date.now();
+    const origin = this.localPlayer.mesh.position.clone().add(new THREE.Vector3(0, 1.5, 0));
+    const pellets = [];
 
-    this.scene.add(mesh);
-    const projectileId = Date.now().toString();
-    this.projectiles.set(projectileId, mesh);
+    for (let i = 0; i < weapon.pellets; i++) {
+      const direction = baseDirection.clone();
+      if (weapon.spread > 0) {
+        direction.x += (Math.random() - 0.5) * weapon.spread * 2;
+        direction.y += (Math.random() - 0.5) * weapon.spread * 2;
+        direction.z += (Math.random() - 0.5) * weapon.spread * 2;
+        direction.normalize();
+      }
 
-    this.network.sendShot({
-      id: projectileId,
-      position: mesh.position.toArray(),
-      direction: direction.toArray()
-    });
+      const mesh = this.createTracerMesh(origin, direction);
+      mesh.damage = weapon.damage;
+      // Only the shooter's client reports damage for its own projectiles;
+      // observers just render them.
+      mesh.isLocal = true;
+      this.scene.add(mesh);
+
+      const projectileId = `${now}-${i}-${Math.floor(Math.random() * 1e6)}`;
+      this.projectiles.set(projectileId, mesh);
+      pellets.push({
+        id: projectileId,
+        position: mesh.position.toArray(),
+        direction: direction.toArray()
+      });
+    }
+
+    if (this.currentWeapon === 'shotgun') {
+      sound.shootShotgun();
+    } else {
+      sound.shootPistol();
+    }
+
+    this.network.sendShot({ weapon: this.currentWeapon, pellets });
   }
 
   initLocalPlayer(id, position) {
@@ -323,6 +553,7 @@ export class GameScene {
   triggerHitFeedback(attackerPosition) {
     this.shakeUntil = Date.now() + this.SHAKE_DURATION;
     this.hud.flashDamage();
+    sound.hit();
 
     if (this.localPlayer && attackerPosition) {
       const dx = this.localPlayer.mesh.position.x - attackerPosition.x;
@@ -334,13 +565,9 @@ export class GameScene {
 
   handleRemoteShot(id, position, direction) {
     if (!this.projectiles.has(id)) {
-      const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.2, 8, 8),
-        new THREE.MeshBasicMaterial({ color: 0xff0000 })
-      );
-      mesh.position.set(...position);
-      mesh.direction = new THREE.Vector3(...direction);
-      mesh.createdAt = Date.now();
+      const pos = new THREE.Vector3(...position);
+      const dir = new THREE.Vector3(...direction);
+      const mesh = this.createTracerMesh(pos, dir);
       this.scene.add(mesh);
       this.projectiles.set(id, mesh);
     }
@@ -383,7 +610,23 @@ export class GameScene {
       this.localPlayer.update(this.cameraMode, this.camera, otherPositions);
       this.network.sendPosition(this.localPlayer.getPosition());
       this.hud.updateHealthStat(this.localPlayer.health);
+
+      // STORE proximity: show/hide the "press E" prompt
+      const sdx = this.localPlayer.mesh.position.x - this.storeBuilding.x;
+      const sdz = this.localPlayer.mesh.position.z - this.storeBuilding.z;
+      const nearStoreNow = Math.sqrt(sdx * sdx + sdz * sdz) < 14;
+      if (nearStoreNow !== this.nearStore) {
+        this.nearStore = nearStoreNow;
+        if (nearStoreNow) {
+          this.hud.showShopPrompt();
+        } else {
+          this.hud.hideShopPrompt();
+          this.hud.closeShop();
+        }
+      }
     }
+
+    this.updateViewmodel();
 
     // Update NPCs
     this.npcs.forEach(npc => npc.update(this.camera));
@@ -392,7 +635,7 @@ export class GameScene {
     const now = Date.now();
     this.projectiles.forEach((projectile, id) => {
       // Check if projectile is out of bounds
-      if (projectile.position.length() > 100) {
+      if (projectile.position.length() > WORLD_HALF * 2) {
         this.scene.remove(projectile);
         this.projectiles.delete(id);
         return;
@@ -416,14 +659,15 @@ export class GameScene {
       // Check remote players
       this.remotePlayers.forEach((player) => {
         if (player.isAlive && projectile.position.distanceTo(player.mesh.position) < hitRadius) {
-          console.log(`Detected collision with player ${player.id} at distance ${projectile.position.distanceTo(player.mesh.position)}`);
-          
-          // Send damage event first
-          this.network.sendDamage({
-            targetId: player.id,
-            amount: 10,
-            isNPC: false
-          });
+          // Only the shooter's own projectiles report damage -- otherwise
+          // every observing client would double-report the same hit.
+          if (projectile.isLocal) {
+            this.network.sendDamage({
+              targetId: player.id,
+              amount: projectile.damage || 10,
+              isNPC: false
+            });
+          }
 
           // Visual feedback
           const originalColor = player.mesh.material.color.clone();
@@ -442,14 +686,13 @@ export class GameScene {
       // Check NPCs
       this.npcs.forEach((npc) => {
         if (npc.isAlive && projectile.position.distanceTo(npc.mesh.position) < hitRadius) {
-          console.log(`Detected collision with NPC ${npc.id} at distance ${projectile.position.distanceTo(npc.mesh.position)}`);
-          
-          // Send damage event first
-          this.network.sendDamage({
-            targetId: npc.id,
-            amount: 10,
-            isNPC: true
-          });
+          if (projectile.isLocal) {
+            this.network.sendDamage({
+              targetId: npc.id,
+              amount: projectile.damage || 10,
+              isNPC: true
+            });
+          }
 
           // Visual feedback
           const originalColor = npc.mesh.material.color.clone();
@@ -479,6 +722,7 @@ export class GameScene {
         if (Math.sqrt(dx * dx + dz * dz) < collectRadius) {
           this.network.socket.emit('collectMoney', id);
           this.removeMoneyPickup(id);
+          sound.pickup();
         }
       }
     });

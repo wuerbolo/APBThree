@@ -1,10 +1,31 @@
 import { io } from 'socket.io-client';
 import { DEAD_COLOR } from '../utils/factionColors.js';
+import { sound } from '../utils/sound.js';
+
+// Persistent per-browser identity so the server can hand you back your
+// character across refreshes and server restarts.
+function getPlayerToken() {
+  try {
+    let token = localStorage.getItem('apb-player-token');
+    if (!token) {
+      token = (crypto.randomUUID && crypto.randomUUID())
+        || `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      localStorage.setItem('apb-player-token', token);
+    }
+    return token;
+  } catch (e) {
+    return null; // private browsing etc. -- falls back to per-session identity
+  }
+}
 
 export class NetworkSystem {
   constructor(gameScene) {
     this.gameScene = gameScene;
-    this.socket = io(import.meta.env.VITE_SERVER_URL || undefined);
+    const token = getPlayerToken();
+    this.socket = io(
+      import.meta.env.VITE_SERVER_URL || undefined,
+      token ? { auth: { token } } : undefined
+    );
     
     // Add connection monitoring
     this.socket.on('connect', () => {
@@ -141,8 +162,15 @@ export class NetworkSystem {
       }
     });
 
-    this.socket.on('shoot', ({ id, position, direction, playerId }) => {
-      this.gameScene.handleRemoteShot(id, position, direction);
+    this.socket.on('shoot', (data) => {
+      // New format: { weapon, pellets: [{id, position, direction}] }.
+      // Old single-projectile format kept as a fallback.
+      const pellets = data.pellets || [{ id: data.id, position: data.position, direction: data.direction }];
+      pellets.forEach(p => this.gameScene.handleRemoteShot(p.id, p.position, p.direction));
+    });
+
+    this.socket.on('leaderboard', (entries) => {
+      this.gameScene.hud.updateLeaderboard(entries);
     });
 
     this.socket.on('updateHealth', ({ id, health, isAlive, isNPC, faction, attackerPosition }) => {
@@ -183,6 +211,8 @@ export class NetworkSystem {
           // Show death overlay for local player when they die
           if (id === this.socket.id && oldHealth > 0 && health <= 0) {
             console.log('Local player died, showing death overlay');
+            sound.death();
+            this.gameScene.hud.closeShop();
             this.gameScene.hud.showDeathOverlay();
           }
         }
@@ -265,6 +295,22 @@ export class NetworkSystem {
         console.error('Failed to create character:', response.error);
         // Show faction selection again with error
         this.gameScene.hud.showFactionSelection();
+      }
+    });
+  }
+
+  buyWeapon(weaponId) {
+    this.socket.emit('buyWeapon', weaponId, (response) => {
+      if (response && response.success) {
+        sound.buy();
+        this.gameScene.character = response.character;
+        this.gameScene.hud.showCharacterInfo(response.character);
+        if (this.gameScene.localPlayer) {
+          this.gameScene.localPlayer.applyCharacter(response.character);
+        }
+        this.gameScene.hud.renderShop(response.character);
+      } else {
+        this.gameScene.hud.showShopError((response && response.error) || 'Purchase failed');
       }
     });
   }

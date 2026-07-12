@@ -270,6 +270,7 @@ export class HUD {
             <div>Level: ${character.level}</div>
             <div>Reputation: <span id="stat-reputation">${character.reputation}</span> / ${character.reputationForNextLevel}</div>
             <div>Money: $<span id="stat-money">${character.money}</span></div>
+            <div>Weapon: <span id="stat-weapon">${this.gameScene.currentWeapon}</span> <span style="opacity:0.6">(1/2 to switch)</span></div>
         `;
     }
 
@@ -277,6 +278,170 @@ export class HUD {
     updateHealthStat(health) {
         const healthEl = document.getElementById('stat-health');
         if (healthEl) healthEl.textContent = Math.max(0, Math.round(health));
+    }
+
+    updateWeaponStat(weaponId) {
+        const weaponEl = document.getElementById('stat-weapon');
+        if (weaponEl) weaponEl.textContent = weaponId;
+    }
+
+    // --- Crosshair ---------------------------------------------------------
+
+    setCrosshairVisible(visible) {
+        if (this._crosshairVisible === visible) return;
+        this._crosshairVisible = visible;
+        let crosshair = document.getElementById('crosshair');
+        if (!crosshair) {
+            crosshair = document.createElement('div');
+            crosshair.id = 'crosshair';
+            crosshair.textContent = '+';
+            crosshair.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                color: rgba(255, 255, 255, 0.85);
+                font-size: 28px;
+                font-family: monospace;
+                text-shadow: 0 0 3px rgba(0,0,0,0.9);
+                pointer-events: none;
+                z-index: 800;
+            `;
+            document.body.appendChild(crosshair);
+        }
+        crosshair.style.display = visible ? 'block' : 'none';
+    }
+
+    // --- Leaderboard -------------------------------------------------------
+
+    updateLeaderboard(entries) {
+        let panel = document.getElementById('leaderboard');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'leaderboard';
+            panel.style.cssText = `
+                position: fixed;
+                top: 10px;
+                right: 10px;
+                background-color: rgba(0, 0, 0, 0.7);
+                color: white;
+                padding: 10px;
+                border-radius: 5px;
+                font-family: Arial, sans-serif;
+                font-size: 13px;
+                z-index: 100;
+                min-width: 170px;
+            `;
+            document.body.appendChild(panel);
+        }
+
+        const factionColor = (faction) =>
+            faction === 'Criminal' ? '#ff5252' : faction === 'Enforcer' ? '#64b5f6' : '#81c784';
+
+        const rows = entries.length
+            ? entries.map((e, i) =>
+                `<div><span style="opacity:0.6">${i + 1}.</span> <span style="color:${factionColor(e.faction)}">${e.name}</span> — ${e.reputation} rep</div>`
+              ).join('')
+            : '<div style="opacity:0.6">Nobody online</div>';
+
+        panel.innerHTML = `<div style="font-weight:bold; margin-bottom:4px;">Fame / Infamy</div>${rows}`;
+    }
+
+    // --- Shop --------------------------------------------------------------
+
+    showShopPrompt() {
+        let prompt = document.getElementById('shop-prompt');
+        if (!prompt) {
+            prompt = document.createElement('div');
+            prompt.id = 'shop-prompt';
+            prompt.textContent = 'Press E to open the STORE';
+            prompt.style.cssText = `
+                position: fixed;
+                bottom: 90px;
+                left: 50%;
+                transform: translateX(-50%);
+                background-color: rgba(0, 0, 0, 0.75);
+                color: #ffb74d;
+                padding: 10px 18px;
+                border-radius: 5px;
+                font-family: Arial, sans-serif;
+                font-size: 16px;
+                z-index: 850;
+                pointer-events: none;
+            `;
+            document.body.appendChild(prompt);
+        }
+        prompt.style.display = 'block';
+    }
+
+    hideShopPrompt() {
+        const prompt = document.getElementById('shop-prompt');
+        if (prompt) prompt.style.display = 'none';
+    }
+
+    isShopOpen() {
+        return !!document.getElementById('shop-overlay');
+    }
+
+    openShop(character) {
+        if (this.isShopOpen()) return;
+        const overlay = document.createElement('div');
+        overlay.id = 'shop-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(15, 15, 15, 0.95);
+            color: white;
+            padding: 25px 30px;
+            border-radius: 8px;
+            border: 2px solid #ff9800;
+            font-family: Arial, sans-serif;
+            z-index: 1100;
+            min-width: 320px;
+        `;
+        document.body.appendChild(overlay);
+        this.renderShop(character);
+    }
+
+    renderShop(character) {
+        const overlay = document.getElementById('shop-overlay');
+        if (!overlay) return;
+
+        const money = character ? character.money : 0;
+        const ownsShotgun = !!(character && Array.isArray(character.weapons) && character.weapons.includes('shotgun'));
+
+        overlay.innerHTML = `
+            <div style="font-size: 22px; font-weight: bold; color: #ff9800; margin-bottom: 4px;">STORE</div>
+            <div style="opacity: 0.7; margin-bottom: 14px;">Your money: $<span id="shop-money">${money}</span></div>
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 10px; background: rgba(255,255,255,0.06); border-radius: 5px;">
+                <div>
+                    <div style="font-weight: bold;">Shotgun</div>
+                    <div style="font-size: 12px; opacity: 0.7;">6 pellets, brutal up close</div>
+                </div>
+                ${ownsShotgun
+                    ? '<span style="color: #81c784; font-weight: bold;">OWNED</span>'
+                    : '<button id="shop-buy-shotgun" style="padding: 8px 16px; background: #ff9800; color: #111; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Buy $50</button>'}
+            </div>
+            <div id="shop-error" style="color: #ff5252; font-size: 13px; min-height: 18px; margin-top: 8px;"></div>
+            <div style="opacity: 0.5; font-size: 12px; margin-top: 6px;">Press E to close</div>
+        `;
+
+        const buyButton = document.getElementById('shop-buy-shotgun');
+        if (buyButton) {
+            buyButton.onclick = () => this.gameScene.network.buyWeapon('shotgun');
+        }
+    }
+
+    showShopError(message) {
+        const errorEl = document.getElementById('shop-error');
+        if (errorEl) errorEl.textContent = message;
+    }
+
+    closeShop() {
+        const overlay = document.getElementById('shop-overlay');
+        if (overlay) overlay.remove();
     }
 
     // Death penalty: roll the money/reputation numbers down from their old
