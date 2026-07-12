@@ -7,6 +7,22 @@ export class CharacterModel {
     this.money = 0;
   }
 
+  // Cumulative reputation needed to *reach* a given level. Doubles each
+  // level (30, 60, 120, 240...) -- provisional, levels don't unlock
+  // anything yet, just a grindy number to chase.
+  getReputationForLevel(level) {
+    if (level <= 1) return 0;
+    return 30 * (2 ** (level - 2));
+  }
+
+  // Recompute level from current reputation. Call after any reputation
+  // change.
+  updateLevel() {
+    while (this.reputation >= this.getReputationForLevel(this.level + 1)) {
+      this.level++;
+    }
+  }
+
   // Get all character data as an object
   getData() {
     return {
@@ -14,7 +30,8 @@ export class CharacterModel {
       faction: this.faction,
       level: this.level,
       reputation: this.reputation,
-      money: this.money
+      money: this.money,
+      reputationForNextLevel: this.getReputationForLevel(this.level + 1)
     };
   }
 

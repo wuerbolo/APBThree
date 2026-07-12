@@ -3,7 +3,7 @@ import { Player } from '../components/Player';
 import { NPC } from '../components/NPC';
 import { NetworkSystem } from '../systems/Network';
 import { HUD } from '../systems/HUD.js';
-import { BUILDINGS } from '../utils/collision.js';
+import { BUILDINGS, PLAZA, WORLD_SIZE } from '../utils/collision.js';
 
 export class GameScene {
   constructor() {
@@ -17,7 +17,12 @@ export class GameScene {
     this.remotePlayers = new Map();
     this.npcs = new Map();
     this.projectiles = new Map();
+    this.moneyPickups = new Map();
     this.character = null; // Store character data
+
+    // Camera shake, triggered by triggerHitFeedback()
+    this.shakeUntil = 0;
+    this.SHAKE_DURATION = 300;
     
     // Camera controls
     this.cameraMode = 'firstPerson';
@@ -27,7 +32,9 @@ export class GameScene {
     this.mouseSensitivity = 0.002;
     
     // Constants
-    this.TOPDOWN_HEIGHT = 50;
+    this.TOPDOWN_HEIGHT = 20; // was 50 -- way too far out to make anything out
+    this.TOPDOWN_MIN_HEIGHT = 8;
+    this.TOPDOWN_MAX_HEIGHT = 80; // world doubled in size, let zoom pull back further
     this.TOPDOWN_ANGLE = -Math.PI / 4;
     
     // Setup systems
@@ -44,8 +51,8 @@ export class GameScene {
     const skyColor = 0x87ceeb;
     this.scene.background = new THREE.Color(skyColor);
     // Fades the ground's edge into the sky color instead of cutting off
-    // into a black void once you're near the 100-unit world boundary.
-    this.scene.fog = new THREE.Fog(skyColor, 60, 150);
+    // into a black void once you're near the world boundary.
+    this.scene.fog = new THREE.Fog(skyColor, 120, 300);
 
     this.renderer = new THREE.WebGLRenderer();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -71,15 +78,23 @@ export class GameScene {
   }
 
   setupEnvironment() {
-    // Ground
-    const groundGeometry = new THREE.BoxGeometry(100, 1, 100);
-    const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x33aa33 });
+    // Ground -- pastel cement rather than grass
+    const groundGeometry = new THREE.BoxGeometry(WORLD_SIZE, 1, WORLD_SIZE);
+    const groundMaterial = new THREE.MeshStandardMaterial({ color: 0xbdb9ae });
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.position.y = -0.5;
     this.scene.add(ground);
 
+    // Plaza pavement (purely cosmetic -- the monument's collision box lives
+    // in BUILDINGS below).
+    const plazaGeometry = new THREE.BoxGeometry(PLAZA.size, 0.15, PLAZA.size);
+    const plazaMaterial = new THREE.MeshStandardMaterial({ color: 0xd8d3c4 });
+    const plaza = new THREE.Mesh(plazaGeometry, plazaMaterial);
+    plaza.position.set(PLAZA.x, 0.08, PLAZA.z);
+    this.scene.add(plaza);
+
     // Buildings (collision bounds for these live in utils/collision.js)
-    const buildingMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
+    const defaultBuildingMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
 
     BUILDINGS.forEach(building => {
       const geometry = new THREE.BoxGeometry(
@@ -87,10 +102,50 @@ export class GameScene {
         building.height,
         building.halfDepth * 2
       );
-      const mesh = new THREE.Mesh(geometry, buildingMaterial);
+      const material = building.color
+        ? new THREE.MeshStandardMaterial({ color: building.color })
+        : defaultBuildingMaterial;
+      const mesh = new THREE.Mesh(geometry, material);
       mesh.position.set(building.x, building.height / 2, building.z);
       this.scene.add(mesh);
+
+      if (building.label) {
+        const label = this.createBuildingLabel(building.label);
+        label.position.set(building.x, building.height + 3, building.z);
+        this.scene.add(label);
+      }
     });
+  }
+
+  // A billboard sprite so labels like "STORE" stay readable from both
+  // first-person and top-down camera modes. Canvas is sized to the text
+  // itself so longer labels ("ENFORCER HQ") don't get clipped.
+  createBuildingLabel(text) {
+    const font = 'bold 40px Arial';
+    const paddingX = 24;
+
+    const measureCtx = document.createElement('canvas').getContext('2d');
+    measureCtx.font = font;
+    const textWidth = measureCtx.measureText(text).width;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(textWidth) + paddingX * 2;
+    canvas.height = 90;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = font;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+    const sprite = new THREE.Sprite(material);
+    const spriteHeight = 3;
+    sprite.scale.set(spriteHeight * (canvas.width / canvas.height), spriteHeight, 1);
+    return sprite;
   }
 
   setupEventListeners() {
@@ -106,7 +161,7 @@ export class GameScene {
     });
 
     document.addEventListener('mousemove', (event) => {
-      if (this.isPointerLocked && this.cameraMode === 'firstPerson') {
+      if (this.isPointerLocked && this.cameraMode === 'firstPerson' && this.isLocalPlayerAlive()) {
         this.yaw -= event.movementX * this.mouseSensitivity;
         this.pitch -= event.movementY * this.mouseSensitivity;
         this.pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.pitch));
@@ -119,7 +174,7 @@ export class GameScene {
         this.localPlayer.handleKeyDown(event);
       }
       // Camera mode toggle
-      if (event.key === 'v' || event.key === 'V') {
+      if ((event.key === 'v' || event.key === 'V') && this.isLocalPlayerAlive()) {
         this.cameraMode = this.cameraMode === 'firstPerson' ? 'topDown' : 'firstPerson';
         if (this.cameraMode === 'topDown' && document.pointerLockElement) {
           document.exitPointerLock();
@@ -136,6 +191,15 @@ export class GameScene {
     // Shooting
     document.addEventListener('mousedown', this.handleShot.bind(this));
 
+    // Zoom the top-down camera in/out with the scroll wheel
+    document.addEventListener('wheel', (event) => {
+      if (this.cameraMode !== 'topDown') return;
+      this.TOPDOWN_HEIGHT = Math.max(
+        this.TOPDOWN_MIN_HEIGHT,
+        Math.min(this.TOPDOWN_MAX_HEIGHT, this.TOPDOWN_HEIGHT + event.deltaY * 0.05)
+      );
+    });
+
     // Window resize
     window.addEventListener('resize', () => {
       const width = window.innerWidth;
@@ -146,8 +210,13 @@ export class GameScene {
     });
   }
 
+  isLocalPlayerAlive() {
+    return !!this.localPlayer && this.localPlayer.isAlive;
+  }
+
   handleShot(event) {
     if (event.button !== 0) return; // Left click only
+    if (!this.isLocalPlayerAlive()) return;
 
     const projectile = {
       geometry: new THREE.SphereGeometry(0.2, 8, 8),
@@ -193,9 +262,9 @@ export class GameScene {
     this.scene.add(player.mesh);
     player.setPosition(position);
     
-    // Store character data if available
+    // Store character data if available, and recolor to match their faction
     if (characterData) {
-      player.character = characterData;
+      player.applyCharacter(characterData);
     }
     
     this.remotePlayers.set(id, player);
@@ -229,6 +298,40 @@ export class GameScene {
     }
   }
 
+  // Cash dropped by a killed Civilian -- walk over it to collect. Bounces
+  // gently in place so it's easy to spot on the ground.
+  addMoneyPickup(id, position) {
+    const geometry = new THREE.BoxGeometry(0.6, 0.3, 0.9);
+    const material = new THREE.MeshStandardMaterial({ color: 0x4caf50 });
+    const mesh = new THREE.Mesh(geometry, material);
+    const baseY = 0.3;
+    mesh.position.set(position.x, baseY, position.z);
+    this.scene.add(mesh);
+    this.moneyPickups.set(id, { mesh, baseY, spawnTime: Date.now() });
+  }
+
+  removeMoneyPickup(id) {
+    const pickup = this.moneyPickups.get(id);
+    if (pickup) {
+      this.scene.remove(pickup.mesh);
+      this.moneyPickups.delete(id);
+    }
+  }
+
+  // Screen shake + red flash + a shove away from the attacker, triggered by
+  // the local player taking damage.
+  triggerHitFeedback(attackerPosition) {
+    this.shakeUntil = Date.now() + this.SHAKE_DURATION;
+    this.hud.flashDamage();
+
+    if (this.localPlayer && attackerPosition) {
+      const dx = this.localPlayer.mesh.position.x - attackerPosition.x;
+      const dz = this.localPlayer.mesh.position.z - attackerPosition.z;
+      const distance = Math.sqrt(dx * dx + dz * dz) || 1;
+      this.localPlayer.applyKnockback((dx / distance) * 0.6, (dz / distance) * 0.6);
+    }
+  }
+
   handleRemoteShot(id, position, direction) {
     if (!this.projectiles.has(id)) {
       const mesh = new THREE.Mesh(
@@ -259,16 +362,9 @@ export class GameScene {
 
   handleRespawn() {
     if (this.localPlayer) {
-      // Generate new position
-      const x = Math.random() * 80 - 40; // -40 to 40
-      const z = Math.random() * 80 - 40; // -40 to 40
-      const position = { x, y: 1, z };
-      
-      // Send respawn request to server
-      this.network.socket.emit('respawn', position);
-      
-      // Update local position immediately
-      this.localPlayer.setPosition(position);
+      // Server picks the position (HQ for Enforcers, anywhere for
+      // Criminals) and echoes it back via 'playerRespawned'.
+      this.network.socket.emit('respawn');
       this.localPlayer.respawn();
     }
   }
@@ -276,8 +372,17 @@ export class GameScene {
   update() {
     // Update local player
     if (this.localPlayer) {
-      this.localPlayer.update(this.cameraMode, this.camera);
+      const otherPositions = [];
+      this.remotePlayers.forEach(player => {
+        if (player.isAlive) otherPositions.push(player.mesh.position);
+      });
+      this.npcs.forEach(npc => {
+        if (npc.isAlive) otherPositions.push(npc.mesh.position);
+      });
+
+      this.localPlayer.update(this.cameraMode, this.camera, otherPositions);
       this.network.sendPosition(this.localPlayer.getPosition());
+      this.hud.updateHealthStat(this.localPlayer.health);
     }
 
     // Update NPCs
@@ -361,6 +466,23 @@ export class GameScene {
       });
     });
 
+    // Animate and collect money pickups
+    this.moneyPickups.forEach((pickup, id) => {
+      const elapsed = (Date.now() - pickup.spawnTime) / 1000;
+      pickup.mesh.position.y = pickup.baseY + Math.abs(Math.sin(elapsed * 3)) * 0.35;
+      pickup.mesh.rotation.y += 0.03;
+
+      if (this.localPlayer) {
+        const collectRadius = 2;
+        const dx = this.localPlayer.mesh.position.x - pickup.mesh.position.x;
+        const dz = this.localPlayer.mesh.position.z - pickup.mesh.position.z;
+        if (Math.sqrt(dx * dx + dz * dz) < collectRadius) {
+          this.network.socket.emit('collectMoney', id);
+          this.removeMoneyPickup(id);
+        }
+      }
+    });
+
     // Update camera
     if (this.localPlayer) {
       if (this.cameraMode === 'firstPerson') {
@@ -376,6 +498,15 @@ export class GameScene {
           this.localPlayer.mesh.position.z + this.TOPDOWN_HEIGHT
         );
         this.camera.rotation.set(this.TOPDOWN_ANGLE, 0, 0);
+      }
+
+      // Hit shake -- decaying random jitter for the remainder of SHAKE_DURATION
+      const shakeRemaining = this.shakeUntil - Date.now();
+      if (shakeRemaining > 0) {
+        const intensity = (shakeRemaining / this.SHAKE_DURATION) * 0.3;
+        this.camera.position.x += (Math.random() - 0.5) * intensity;
+        this.camera.position.y += (Math.random() - 0.5) * intensity;
+        this.camera.position.z += (Math.random() - 0.5) * intensity;
       }
     }
 

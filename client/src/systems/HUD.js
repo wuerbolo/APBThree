@@ -3,6 +3,39 @@ export class HUD {
         this.gameScene = gameScene;
     }
 
+    // Brief red vignette flash when the local player takes damage.
+    flashDamage() {
+        let flash = document.getElementById('damage-flash');
+        if (!flash) {
+            flash = document.createElement('div');
+            flash.id = 'damage-flash';
+            flash.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: radial-gradient(circle, rgba(255,0,0,0) 55%, rgba(255,0,0,0.55) 100%);
+                pointer-events: none;
+                z-index: 900;
+                transition: opacity 0.3s ease-out;
+                opacity: 0;
+            `;
+            document.body.appendChild(flash);
+        }
+
+        // Restart the fade even if a previous flash is still fading out.
+        // The transition:none -> opacity:1 -> transition:opacity write below
+        // needs a forced reflow in between, or the browser can batch both
+        // writes into a single paint and the flash never becomes visible --
+        // rAF alone doesn't guarantee a paint happens between the two.
+        flash.style.transition = 'none';
+        flash.style.opacity = '1';
+        void flash.offsetWidth;
+        flash.style.transition = 'opacity 0.3s ease-out';
+        flash.style.opacity = '0';
+    }
+
     showDeathOverlay() {
         const overlay = document.createElement('div');
         overlay.style.cssText = `
@@ -35,6 +68,7 @@ export class HUD {
 
         setTimeout(() => {
             overlay.remove();
+            this.showDeathTint();
             this.showRespawnButton();
         }, 2000);
     }
@@ -70,6 +104,7 @@ export class HUD {
 
         button.onclick = () => {
             this.gameScene.handleRespawn();
+            this.hideDeathTint();
             button.remove();
         };
 
@@ -127,29 +162,21 @@ export class HUD {
         
         const criminalButton = this.createFactionButton('Criminal', '#d32f2f', 'Operate outside the law, gain reputation by defeating Enforcers.');
         const enforcerButton = this.createFactionButton('Enforcer', '#1976d2', 'Uphold the law, gain reputation by defeating Criminals.');
-        const civilianButton = this.createFactionButton('Civilian', '#388e3c', 'Neutral faction that can be targeted by anyone.');
-        
+
         criminalButton.onclick = () => {
             const name = nameInput.value || `Criminal${Math.floor(Math.random() * 1000)}`;
             this.selectFaction('Criminal', name);
             overlay.remove();
         };
-        
+
         enforcerButton.onclick = () => {
             const name = nameInput.value || `Enforcer${Math.floor(Math.random() * 1000)}`;
             this.selectFaction('Enforcer', name);
             overlay.remove();
         };
-        
-        civilianButton.onclick = () => {
-            const name = nameInput.value || `Civilian${Math.floor(Math.random() * 1000)}`;
-            this.selectFaction('Civilian', name);
-            overlay.remove();
-        };
-        
+
         buttonsContainer.appendChild(criminalButton);
         buttonsContainer.appendChild(enforcerButton);
-        buttonsContainer.appendChild(civilianButton);
         
         overlay.appendChild(title);
         overlay.appendChild(nameInput);
@@ -239,9 +266,71 @@ export class HUD {
                 <span style="color: ${factionColor};">${character.name}</span>
             </div>
             <div>Faction: <span style="color: ${factionColor};">${character.faction}</span></div>
+            <div>Health: <span id="stat-health">${this.gameScene.localPlayer ? this.gameScene.localPlayer.health : 100}</span></div>
             <div>Level: ${character.level}</div>
-            <div>Reputation: ${character.reputation}</div>
-            <div>Money: $${character.money}</div>
+            <div>Reputation: <span id="stat-reputation">${character.reputation}</span> / ${character.reputationForNextLevel}</div>
+            <div>Money: $<span id="stat-money">${character.money}</span></div>
         `;
     }
-} 
+
+    // Cheap enough to call every frame -- just updates one span's text.
+    updateHealthStat(health) {
+        const healthEl = document.getElementById('stat-health');
+        if (healthEl) healthEl.textContent = Math.max(0, Math.round(health));
+    }
+
+    // Death penalty: roll the money/reputation numbers down from their old
+    // values to the new (post-penalty) ones, like a lock combination
+    // settling into place, instead of just snapping to the new numbers.
+    animateCharacterPenalty(oldCharacter, newCharacter) {
+        this.showCharacterInfo(newCharacter);
+        if (!oldCharacter) return;
+
+        const moneyEl = document.getElementById('stat-money');
+        const repEl = document.getElementById('stat-reputation');
+        if (moneyEl) this.rollNumber(moneyEl, oldCharacter.money, newCharacter.money);
+        if (repEl) this.rollNumber(repEl, oldCharacter.reputation, newCharacter.reputation);
+    }
+
+    rollNumber(el, from, to) {
+        const duration = 900;
+        const start = performance.now();
+
+        const step = (now) => {
+            const progress = Math.min(1, (now - start) / duration);
+            if (progress < 1) {
+                const settled = from + (to - from) * progress;
+                const jitter = (1 - progress) * Math.abs(from - to) * 0.4;
+                const displayValue = Math.round(settled + (Math.random() - 0.5) * jitter);
+                el.textContent = Math.max(0, displayValue);
+                requestAnimationFrame(step);
+            } else {
+                el.textContent = to;
+            }
+        };
+        requestAnimationFrame(step);
+    }
+
+    // Persistent dark red tint while dead -- cleared on respawn.
+    showDeathTint() {
+        if (document.getElementById('death-tint')) return;
+        const tint = document.createElement('div');
+        tint.id = 'death-tint';
+        tint.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(90, 0, 0, 0.45);
+            pointer-events: none;
+            z-index: 950;
+        `;
+        document.body.appendChild(tint);
+    }
+
+    hideDeathTint() {
+        const tint = document.getElementById('death-tint');
+        if (tint) tint.remove();
+    }
+}

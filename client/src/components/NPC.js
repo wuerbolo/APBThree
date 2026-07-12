@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getFactionColor as resolveFactionColor, DEAD_COLOR } from '../utils/factionColors.js';
 
 export class NPC {
   constructor(id, position, faction = "Civilian") {
@@ -24,15 +25,7 @@ export class NPC {
   
   // Return the color for this NPC's faction
   getFactionColor() {
-    switch(this.faction) {
-      case "Criminal":
-        return 0xd32f2f; // Red
-      case "Enforcer":
-        return 0x1976d2; // Blue
-      case "Civilian":
-      default:
-        return 0x388e3c; // Green
-    }
+    return resolveFactionColor(this.faction, false);
   }
 
   createHealthBar() {
@@ -118,7 +111,7 @@ export class NPC {
     this.updateHealthBar();
 
     if (!this.isAlive) {
-      this.mesh.material.color.setHex(0x333333); // Grey when dead
+      this.mesh.material.color.setHex(DEAD_COLOR);
     }
 
     return this.isAlive;

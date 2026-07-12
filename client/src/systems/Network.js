@@ -1,4 +1,5 @@
 import { io } from 'socket.io-client';
+import { DEAD_COLOR } from '../utils/factionColors.js';
 
 export class NetworkSystem {
   constructor(gameScene) {
@@ -22,7 +23,7 @@ export class NetworkSystem {
   }
 
   setupSocketHandlers() {
-    this.socket.on('init', ({ id, position, players, npcs, character, hasCharacter }) => {
+    this.socket.on('init', ({ id, position, players, npcs, pickups, character, hasCharacter }) => {
       console.log('Connected with ID:', id);
       
       // Check if player has a character
@@ -31,9 +32,10 @@ export class NetworkSystem {
         console.log('Loaded existing character:', character);
         this.gameScene.character = character;
         this.gameScene.hud.showCharacterInfo(character);
-        
+
         // Initialize local player
         this.gameScene.initLocalPlayer(id, position);
+        this.gameScene.localPlayer.applyCharacter(character);
       } else {
         // Needs to create a character first - show faction selection UI
         console.log('No character found, showing faction selection');
@@ -56,9 +58,22 @@ export class NetworkSystem {
       });
 
       // Initialize NPCs
-      npcs.forEach(({ id, position }) => {
-        this.gameScene.addNPC(id, position);
+      npcs.forEach(({ id, position, faction }) => {
+        this.gameScene.addNPC(id, position, faction);
       });
+
+      // Initialize any money pickups already on the ground
+      (pickups || []).forEach(({ id, position }) => {
+        this.gameScene.addMoneyPickup(id, position);
+      });
+    });
+
+    this.socket.on('spawnMoneyPickup', ({ id, position }) => {
+      this.gameScene.addMoneyPickup(id, position);
+    });
+
+    this.socket.on('removeMoneyPickup', (id) => {
+      this.gameScene.removeMoneyPickup(id);
     });
 
     // Character updates
@@ -66,13 +81,24 @@ export class NetworkSystem {
       console.log('Character updated:', characterData);
       this.gameScene.character = characterData;
       this.gameScene.hud.showCharacterInfo(characterData);
+      if (this.gameScene.localPlayer) {
+        this.gameScene.localPlayer.applyCharacter(characterData);
+      }
+    });
+
+    // Death penalty: money reset to 0, reputation halved -- animate the
+    // drop instead of just snapping to the new values.
+    this.socket.on('characterPenalty', (characterData) => {
+      const oldCharacter = this.gameScene.character;
+      this.gameScene.character = characterData;
+      this.gameScene.hud.animateCharacterPenalty(oldCharacter, characterData);
     });
 
     this.socket.on('playerUpdated', ({ id, character }) => {
-      // Update remote player's character data
+      // Update remote player's character data (and recolor them to match)
       const remotePlayer = this.gameScene.remotePlayers.get(id);
       if (remotePlayer) {
-        remotePlayer.character = character;
+        remotePlayer.applyCharacter(character);
       }
     });
 
@@ -119,7 +145,7 @@ export class NetworkSystem {
       this.gameScene.handleRemoteShot(id, position, direction);
     });
 
-    this.socket.on('updateHealth', ({ id, health, isAlive, isNPC, faction }) => {
+    this.socket.on('updateHealth', ({ id, health, isAlive, isNPC, faction, attackerPosition }) => {
       console.log(`Received health update: ${id} (${isNPC ? 'NPC' : 'Player'}) - Health: ${health}, Alive: ${isAlive}, Faction: ${faction || 'Unknown'}`);
       
       if (isNPC) {
@@ -128,53 +154,36 @@ export class NetworkSystem {
           const oldHealth = npc.health;
           npc.health = health;
           npc.isAlive = isAlive;
-          
+
           // Update faction if provided
           if (faction && faction !== npc.faction) {
             npc.setFaction(faction);
           }
-          
+
           npc.updateHealthBar();
           console.log(`NPC ${id} health changed from ${oldHealth} to ${health}`);
-          
-          if (!isAlive) {
-            npc.mesh.material.color.setHex(0x333333); // Grey when dead
-          }
+
+          npc.mesh.material.color.setHex(isAlive ? npc.getFactionColor() : DEAD_COLOR);
         }
       } else {
-        const player = id === this.socket.id ? 
-          this.gameScene.localPlayer : 
+        const player = id === this.socket.id ?
+          this.gameScene.localPlayer :
           this.gameScene.remotePlayers.get(id);
-        
+
         if (player) {
           const oldHealth = player.health;
-          player.health = health;
-          player.isAlive = isAlive;
-          player.updateHealthBar();
+          player.applyHealthUpdate(health, isAlive);
           console.log(`Player ${id} health changed from ${oldHealth} to ${health}`);
+
+          // Camera shake/flash/knockback feedback for the local player getting hit
+          if (id === this.socket.id && health < oldHealth) {
+            this.gameScene.triggerHitFeedback(attackerPosition);
+          }
 
           // Show death overlay for local player when they die
           if (id === this.socket.id && oldHealth > 0 && health <= 0) {
             console.log('Local player died, showing death overlay');
             this.gameScene.hud.showDeathOverlay();
-          }
-
-          // Update color based on alive status first
-          if (!isAlive) {
-            player.mesh.material.color.setHex(0x333333); // Grey when dead
-          } else if (health === 100) { // Full health (respawn)
-            if (player === this.gameScene.localPlayer) {
-              player.mesh.material.color.setRGB(0, 1, 0); // Full green
-            } else {
-              player.mesh.material.color.setRGB(1, 0, 0); // Full red
-            }
-          } else { // Partial health
-            const healthFactor = health / 100;
-            if (player === this.gameScene.localPlayer) {
-              player.mesh.material.color.setRGB(0, healthFactor, 0); // Green varying with health
-            } else {
-              player.mesh.material.color.setRGB(1, healthFactor, healthFactor); // Red varying with health
-            }
           }
         }
       }
@@ -244,9 +253,13 @@ export class NetworkSystem {
         // Show character info in HUD
         this.gameScene.hud.showCharacterInfo(response.character);
         
-        // Make local player visible
+        // Make local player visible and colored to match the chosen faction
         if (this.gameScene.localPlayer) {
           this.gameScene.localPlayer.mesh.visible = true;
+          this.gameScene.localPlayer.applyCharacter(response.character);
+          if (response.position) {
+            this.gameScene.localPlayer.setPosition(response.position);
+          }
         }
       } else {
         console.error('Failed to create character:', response.error);
