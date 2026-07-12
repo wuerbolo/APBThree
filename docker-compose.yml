@@ -4,6 +4,8 @@ services:
     image: apb-three:latest
     container_name: apb-three
     restart: unless-stopped
+    mem_limit: 512m
+    mem_reservation: 256m
     environment:
       PORT: 3000
       CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:5173}
