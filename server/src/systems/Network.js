@@ -366,15 +366,50 @@ export class NetworkSystem {
 
   startNPCLoop() {
     setInterval(() => {
+      const alivePlayers = Array.from(this.players.entries())
+        .filter(([, p]) => p.isAlive && p.hasCharacter())
+        .map(([id, p]) => ({
+          id,
+          position: p.getPosition(),
+          faction: p.getCharacter().faction
+        }));
+
       this.npcs.forEach((npc, id) => {
-        const newPosition = npc.update();
+        const { position, attack } = npc.update(alivePlayers);
         if (npc.isAlive) {
           this.io.emit('npcMoved', {
             id,
-            position: newPosition
+            position
           });
+        }
+        if (attack) {
+          this.applyNPCAttack(id, attack.targetId, attack.amount);
         }
       });
     }, 50); // Update every 50ms
+  }
+
+  // An Enforcer/Criminal NPC caught up to an opposing-faction player and is
+  // in range -- deal damage the same way a player-vs-player hit would.
+  applyNPCAttack(npcId, targetId, amount) {
+    const targetPlayer = this.players.get(targetId);
+    if (!targetPlayer || !targetPlayer.isAlive) return;
+
+    targetPlayer.takeDamage(amount);
+    const targetFaction = targetPlayer.hasCharacter() ? targetPlayer.getCharacter().faction : null;
+
+    console.log(`Player ${targetId} (${targetFaction}) took ${amount} damage from NPC ${npcId}. Health: ${targetPlayer.health}`);
+
+    this.io.emit('updateHealth', {
+      id: targetId,
+      health: targetPlayer.health,
+      isAlive: targetPlayer.isAlive,
+      isNPC: false,
+      faction: targetFaction
+    });
+
+    if (!targetPlayer.isAlive) {
+      console.log(`Player ${targetId} was killed by NPC ${npcId}!`);
+    }
   }
 } 

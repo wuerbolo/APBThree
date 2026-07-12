@@ -9,9 +9,25 @@ export class NPCModel {
     this.isAlive = true;
     this.speed = 0.2;
     this.despawnTimer = null;
-    
+
+    // Chase AI (Enforcer <-> Criminal only; Civilian NPCs never chase)
+    this.chaseSpeed = 0.32;
+    this.chaseRange = 20;
+    this.attackRange = 2.5;
+    this.attackCooldown = 1000;
+    this.attackDamage = 8;
+    this.lastAttackTime = 0;
+
     // Assign a faction if not provided
     this.faction = faction || this.getRandomFaction();
+  }
+
+  // The faction of player this NPC will chase and attack on sight, or null
+  // if this NPC never initiates a chase (Civilians just wander).
+  getOpposingFaction() {
+    if (this.faction === "Enforcer") return "Criminal";
+    if (this.faction === "Criminal") return "Enforcer";
+    return null;
   }
 
   // Random faction assignment - 60% chance of Civilian, 20% each for Criminal and Enforcer
@@ -26,18 +42,43 @@ export class NPCModel {
     }
   }
 
-  update() {
-    if (!this.isAlive) return this.position;
+  // alivePlayers: [{ id, position, faction }] -- only alive players with a
+  // character, passed in fresh each tick by NetworkSystem.
+  update(alivePlayers = []) {
+    if (!this.isAlive) return { position: this.position, attack: null };
 
-    const dx = this.targetPosition.x - this.position.x;
-    const dz = this.targetPosition.z - this.position.z;
-    const distance = Math.sqrt(dx * dx + dz * dz);
+    let attack = null;
+    const target = this.findChaseTarget(alivePlayers);
 
-    if (distance < this.speed) {
-      this.targetPosition = this.getNewTargetPosition();
+    if (target) {
+      this.targetPosition = null; // drop any wander target while chasing
+      const dx = target.position.x - this.position.x;
+      const dz = target.position.z - this.position.z;
+      const distance = Math.sqrt(dx * dx + dz * dz);
+
+      if (distance > this.attackRange) {
+        this.position.x += (dx / distance) * this.chaseSpeed;
+        this.position.z += (dz / distance) * this.chaseSpeed;
+      } else {
+        const now = Date.now();
+        if (now - this.lastAttackTime >= this.attackCooldown) {
+          this.lastAttackTime = now;
+          attack = { targetId: target.id, amount: this.attackDamage };
+        }
+      }
     } else {
-      this.position.x += (dx / distance) * this.speed;
-      this.position.z += (dz / distance) * this.speed;
+      if (!this.targetPosition) this.targetPosition = this.getNewTargetPosition();
+
+      const dx = this.targetPosition.x - this.position.x;
+      const dz = this.targetPosition.z - this.position.z;
+      const distance = Math.sqrt(dx * dx + dz * dz);
+
+      if (distance < this.speed) {
+        this.targetPosition = this.getNewTargetPosition();
+      } else {
+        this.position.x += (dx / distance) * this.speed;
+        this.position.z += (dz / distance) * this.speed;
+      }
     }
 
     // Keep within bounds
@@ -52,11 +93,31 @@ export class NPCModel {
     const beforeX = this.position.x;
     const beforeZ = this.position.z;
     resolveBuildingCollision(this.position);
-    if (this.position.x !== beforeX || this.position.z !== beforeZ) {
+    if ((this.position.x !== beforeX || this.position.z !== beforeZ) && !target) {
       this.targetPosition = this.getNewTargetPosition();
     }
 
-    return this.position;
+    return { position: this.position, attack };
+  }
+
+  // Closest alive player of the opposing faction within chase range, or null.
+  findChaseTarget(alivePlayers) {
+    const opposingFaction = this.getOpposingFaction();
+    if (!opposingFaction) return null;
+
+    let closest = null;
+    let closestDist = this.chaseRange;
+    for (const player of alivePlayers) {
+      if (player.faction !== opposingFaction) continue;
+      const dx = player.position.x - this.position.x;
+      const dz = player.position.z - this.position.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closest = player;
+      }
+    }
+    return closest;
   }
 
   getNewTargetPosition() {
