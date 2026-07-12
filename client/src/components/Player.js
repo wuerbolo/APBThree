@@ -51,8 +51,11 @@ export class Player {
     barrel.position.z = -0.4;
     gunGroup.add(barrel);
 
-    // Held out to the side and slightly forward, like a raised arm
-    gunGroup.position.set(0.7, 0.1, -0.5);
+    // Held out to the side and slightly forward, like a raised arm.
+    // The player mesh is a 2x2x2 box (extends to +/-1 on each axis), so this
+    // has to clear x=1 or it renders buried inside the opaque body -- which
+    // is exactly the bug that made the gun invisible before.
+    gunGroup.position.set(1.3, 0, -0.3);
 
     this.gun = gunGroup;
     this.mesh.add(this.gun);
