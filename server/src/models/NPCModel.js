@@ -42,13 +42,15 @@ export class NPCModel {
     }
   }
 
-  // alivePlayers: [{ id, position, faction }] -- only alive players with a
-  // character, passed in fresh each tick by NetworkSystem.
-  update(alivePlayers = []) {
+  // alivePlayers: [{ id, position, faction }], aliveNpcs: [{ id, position, faction }]
+  // -- fresh snapshots passed in each tick by NetworkSystem. Enforcer/Criminal
+  // NPCs chase and attack whichever opposing-faction target (player or NPC)
+  // is closest.
+  update(alivePlayers = [], aliveNpcs = []) {
     if (!this.isAlive) return { position: this.position, attack: null };
 
     let attack = null;
-    const target = this.findChaseTarget(alivePlayers);
+    const target = this.findChaseTarget(alivePlayers, aliveNpcs);
 
     if (target) {
       this.targetPosition = null; // drop any wander target while chasing
@@ -63,7 +65,7 @@ export class NPCModel {
         const now = Date.now();
         if (now - this.lastAttackTime >= this.attackCooldown) {
           this.lastAttackTime = now;
-          attack = { targetId: target.id, amount: this.attackDamage };
+          attack = { targetId: target.id, targetType: target.type, amount: this.attackDamage };
         }
       }
     } else {
@@ -100,23 +102,30 @@ export class NPCModel {
     return { position: this.position, attack };
   }
 
-  // Closest alive player of the opposing faction within chase range, or null.
-  findChaseTarget(alivePlayers) {
+  // Closest alive opposing-faction target (player or NPC) within chase
+  // range, or null. Players and NPCs compete for "closest" equally.
+  findChaseTarget(alivePlayers, aliveNpcs) {
     const opposingFaction = this.getOpposingFaction();
     if (!opposingFaction) return null;
 
     let closest = null;
     let closestDist = this.chaseRange;
-    for (const player of alivePlayers) {
-      if (player.faction !== opposingFaction) continue;
-      const dx = player.position.x - this.position.x;
-      const dz = player.position.z - this.position.z;
+
+    const consider = (candidate, type) => {
+      if (candidate.id === this.id) return;
+      if (candidate.faction !== opposingFaction) return;
+      const dx = candidate.position.x - this.position.x;
+      const dz = candidate.position.z - this.position.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
       if (dist < closestDist) {
         closestDist = dist;
-        closest = player;
+        closest = { id: candidate.id, position: candidate.position, type };
       }
-    }
+    };
+
+    alivePlayers.forEach(p => consider(p, 'player'));
+    aliveNpcs.forEach(n => consider(n, 'npc'));
+
     return closest;
   }
 

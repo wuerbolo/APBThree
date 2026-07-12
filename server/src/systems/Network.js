@@ -374,8 +374,16 @@ export class NetworkSystem {
           faction: p.getCharacter().faction
         }));
 
+      const aliveNpcs = Array.from(this.npcs.entries())
+        .filter(([, n]) => n.isAlive)
+        .map(([id, n]) => ({
+          id,
+          position: n.getPosition(),
+          faction: n.faction
+        }));
+
       this.npcs.forEach((npc, id) => {
-        const { position, attack } = npc.update(alivePlayers);
+        const { position, attack } = npc.update(alivePlayers, aliveNpcs);
         if (npc.isAlive) {
           this.io.emit('npcMoved', {
             id,
@@ -383,7 +391,11 @@ export class NetworkSystem {
           });
         }
         if (attack) {
-          this.applyNPCAttack(id, attack.targetId, attack.amount);
+          if (attack.targetType === 'npc') {
+            this.applyNPCAttackOnNPC(id, attack.targetId, attack.amount);
+          } else {
+            this.applyNPCAttack(id, attack.targetId, attack.amount);
+          }
         }
       });
     }, 50); // Update every 50ms
@@ -410,6 +422,30 @@ export class NetworkSystem {
 
     if (!targetPlayer.isAlive) {
       console.log(`Player ${targetId} was killed by NPC ${npcId}!`);
+    }
+  }
+
+  // An Enforcer/Criminal NPC caught up to an opposing-faction NPC -- same
+  // damage/death flow as a player killing an NPC.
+  applyNPCAttackOnNPC(attackerId, targetNpcId, amount) {
+    const targetNpc = this.npcs.get(targetNpcId);
+    if (!targetNpc || !targetNpc.isAlive) return;
+
+    targetNpc.takeDamage(amount);
+
+    console.log(`NPC ${targetNpcId} (${targetNpc.faction}) took ${amount} damage from NPC ${attackerId}. Health: ${targetNpc.health}`);
+
+    this.io.emit('updateHealth', {
+      id: targetNpcId,
+      health: targetNpc.health,
+      isAlive: targetNpc.isAlive,
+      isNPC: true,
+      faction: targetNpc.faction
+    });
+
+    if (!targetNpc.isAlive) {
+      console.log(`NPC ${targetNpcId} was killed by NPC ${attackerId}!`);
+      this.npcSpawner.onNPCDeath(targetNpcId);
     }
   }
 } 
