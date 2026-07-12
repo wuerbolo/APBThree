@@ -1,21 +1,11 @@
-import { NPCModel } from '../models/NPCModel.js';
+import { NPCModel, randomNPCFaction } from '../models/NPCModel.js';
+import { getSpawnPositionForFaction } from '../utils/collision.js';
 
 export class NPCSpawner {
     constructor(networkSystem, targetPopulation = 5) {
         this.networkSystem = networkSystem;
         this.targetPopulation = targetPopulation;
         this.respawnQueue = [];
-        this.spawnPoints = [
-            { x: -40, z: -40 },
-            { x: 40, z: -40 },
-            { x: -40, z: 40 },
-            { x: 40, z: 40 },
-            { x: 0, z: 0 }
-        ];
-        // Cycles through spawnPoints in order instead of picking randomly,
-        // so NPCs spread across all corners instead of clumping wherever
-        // Math.random() happens to favor.
-        this.nextSpawnPointIndex = 0;
         // Date.now() alone isn't unique enough -- multiple NPCs spawning in
         // the same millisecond (e.g. the initial population burst) would
         // collide and silently overwrite each other in this.networkSystem.npcs.
@@ -62,24 +52,16 @@ export class NPCSpawner {
     }
 
     spawnNPC() {
-        // Cycle through spawn points in order rather than rolling randomly
-        // each time, so population spreads across corners predictably.
-        const spawnPoint = this.spawnPoints[this.nextSpawnPointIndex];
-        this.nextSpawnPointIndex = (this.nextSpawnPointIndex + 1) % this.spawnPoints.length;
-
-        // Add some randomness to spawn position
-        const position = {
-            x: spawnPoint.x + (Math.random() * 10 - 5),
-            y: 1,
-            z: spawnPoint.z + (Math.random() * 10 - 5)
-        };
+        // Faction has to be picked before the position: Enforcers spawn at
+        // their HQ, everyone else spawns anywhere on the open map.
+        const faction = randomNPCFaction();
+        const position = getSpawnPositionForFaction(faction);
 
         // Date.now() + an incrementing sequence -- guarantees uniqueness
         // even when several NPCs spawn within the same millisecond.
         const id = `npc-${Date.now()}-${this.nextNpcSequence++}`;
-        
-        // Create new NPC - faction will be randomly assigned in the constructor
-        const npc = new NPCModel(id, position);
+
+        const npc = new NPCModel(id, position, faction);
         
         // Set up despawn callback
         npc.setDespawnCallback((npcId) => {

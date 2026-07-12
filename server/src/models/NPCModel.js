@@ -1,4 +1,16 @@
-import { resolveBuildingCollision, resolveEntityCollision } from '../utils/collision.js';
+import { resolveBuildingCollision, resolveEntityCollision, WORLD_HALF, WORLD_SIZE } from '../utils/collision.js';
+
+// 60% Civilian, 20% Criminal, 20% Enforcer.
+export function randomNPCFaction() {
+  const rand = Math.random();
+  if (rand < 0.6) {
+    return "Civilian";
+  } else if (rand < 0.8) {
+    return "Criminal";
+  } else {
+    return "Enforcer";
+  }
+}
 
 export class NPCModel {
   constructor(id, position, faction = null) {
@@ -19,7 +31,7 @@ export class NPCModel {
     this.lastAttackTime = 0;
 
     // Assign a faction if not provided
-    this.faction = faction || this.getRandomFaction();
+    this.faction = faction || randomNPCFaction();
   }
 
   // The faction of player this NPC will chase and attack on sight, or null
@@ -28,18 +40,6 @@ export class NPCModel {
     if (this.faction === "Enforcer") return "Criminal";
     if (this.faction === "Criminal") return "Enforcer";
     return null;
-  }
-
-  // Random faction assignment - 60% chance of Civilian, 20% each for Criminal and Enforcer
-  getRandomFaction() {
-    const rand = Math.random();
-    if (rand < 0.6) {
-      return "Civilian";
-    } else if (rand < 0.8) {
-      return "Criminal";
-    } else {
-      return "Enforcer";
-    }
   }
 
   // alivePlayers: [{ id, position, faction }], aliveNpcs: [{ id, position, faction }]
@@ -84,8 +84,8 @@ export class NPCModel {
     }
 
     // Keep within bounds
-    this.position.x = Math.max(-50, Math.min(50, this.position.x));
-    this.position.z = Math.max(-50, Math.min(50, this.position.z));
+    this.position.x = Math.max(-WORLD_HALF, Math.min(WORLD_HALF, this.position.x));
+    this.position.z = Math.max(-WORLD_HALF, Math.min(WORLD_HALF, this.position.z));
 
     // If a building or another body blocked this step, the current target
     // is behind/inside it and the distance-to-target check above will
@@ -138,13 +138,10 @@ export class NPCModel {
   }
 
   getNewTargetPosition() {
-    const GROUND_SIZE = 100;
-    const GROUND_HALF = GROUND_SIZE / 2;
-
     return {
-      x: (Math.random() * GROUND_SIZE) - GROUND_HALF,
+      x: (Math.random() * WORLD_SIZE) - WORLD_HALF,
       y: 1,
-      z: (Math.random() * GROUND_SIZE) - GROUND_HALF
+      z: (Math.random() * WORLD_SIZE) - WORLD_HALF
     };
   }
 

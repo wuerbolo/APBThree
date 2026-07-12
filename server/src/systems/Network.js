@@ -3,6 +3,7 @@ import { PlayerModel } from '../models/PlayerModel.js';
 import { NPCSpawner } from './NPCSpawner.js';
 import { CharacterSystem } from './CharacterSystem.js';
 import { RateLimiter } from '../utils/RateLimiter.js';
+import { getSpawnPositionForFaction } from '../utils/collision.js';
 import * as THREE from 'three';
 
 function getClientIp(socket) {
@@ -121,11 +122,17 @@ export class NetworkSystem {
         // Create character
         const character = this.characterSystem.createCharacter(socket.id, name, faction);
         player.setCharacter(character);
-        
+
+        // Place them at their faction's spawn -- HQ for Enforcers, anywhere
+        // on the map for Criminals.
+        const spawnPosition = getSpawnPositionForFaction(faction);
+        player.updatePosition(spawnPosition);
+
         // Send character data back to the client
-        callback({ 
-          success: true, 
-          character: character.getData() 
+        callback({
+          success: true,
+          character: character.getData(),
+          position: spawnPosition
         });
         
         // Broadcast character data to other players
@@ -336,9 +343,12 @@ export class NetworkSystem {
       });
 
       // Handle respawn events
-      socket.on('respawn', (position) => {
+      socket.on('respawn', () => {
         const player = this.players.get(socket.id);
         if (player) {
+          const faction = player.hasCharacter() ? player.getCharacter().faction : null;
+          const position = getSpawnPositionForFaction(faction);
+
           player.health = 100;
           player.isAlive = true;
           player.updatePosition(position);

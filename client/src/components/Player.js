@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { resolveBuildingCollision, resolveEntityCollision } from '../utils/collision.js';
+import { resolveBuildingCollision, resolveEntityCollision, WORLD_HALF } from '../utils/collision.js';
 import { getFactionColor as resolveFactionColor, DEAD_COLOR } from '../utils/factionColors.js';
 
 export class Player {
@@ -207,8 +207,8 @@ export class Player {
     }
 
     // Keep player within bounds
-    this.mesh.position.x = Math.max(-50, Math.min(50, this.mesh.position.x));
-    this.mesh.position.z = Math.max(-50, Math.min(50, this.mesh.position.z));
+    this.mesh.position.x = Math.max(-WORLD_HALF, Math.min(WORLD_HALF, this.mesh.position.x));
+    this.mesh.position.z = Math.max(-WORLD_HALF, Math.min(WORLD_HALF, this.mesh.position.z));
 
     // Push back out of any building or other player/NPC we just walked into
     resolveBuildingCollision(this.mesh.position);
@@ -260,10 +260,8 @@ export class Player {
     this.health = 100;
     this.isAlive = true;
 
-    // Generate random spawn position
-    const x = Math.random() * 80 - 40; // -40 to 40
-    const z = Math.random() * 80 - 40; // -40 to 40
-    this.mesh.position.set(x, this.groundY, z);
+    // Position is set by the caller from the server's 'playerRespawned'
+    // event (faction-specific spawn point), not decided here.
     this.velocityY = 0;
     this.isJumping = false;
 

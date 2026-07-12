@@ -231,6 +231,9 @@ export class NetworkSystem {
         if (this.gameScene.localPlayer) {
           this.gameScene.localPlayer.mesh.visible = true;
           this.gameScene.localPlayer.applyCharacter(response.character);
+          if (response.position) {
+            this.gameScene.localPlayer.setPosition(response.position);
+          }
         }
       } else {
         console.error('Failed to create character:', response.error);

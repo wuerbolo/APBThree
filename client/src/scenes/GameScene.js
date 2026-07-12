@@ -3,7 +3,7 @@ import { Player } from '../components/Player';
 import { NPC } from '../components/NPC';
 import { NetworkSystem } from '../systems/Network';
 import { HUD } from '../systems/HUD.js';
-import { BUILDINGS } from '../utils/collision.js';
+import { BUILDINGS, PLAZA, WORLD_SIZE } from '../utils/collision.js';
 
 export class GameScene {
   constructor() {
@@ -29,7 +29,7 @@ export class GameScene {
     // Constants
     this.TOPDOWN_HEIGHT = 20; // was 50 -- way too far out to make anything out
     this.TOPDOWN_MIN_HEIGHT = 8;
-    this.TOPDOWN_MAX_HEIGHT = 50;
+    this.TOPDOWN_MAX_HEIGHT = 80; // world doubled in size, let zoom pull back further
     this.TOPDOWN_ANGLE = -Math.PI / 4;
     
     // Setup systems
@@ -46,8 +46,8 @@ export class GameScene {
     const skyColor = 0x87ceeb;
     this.scene.background = new THREE.Color(skyColor);
     // Fades the ground's edge into the sky color instead of cutting off
-    // into a black void once you're near the 100-unit world boundary.
-    this.scene.fog = new THREE.Fog(skyColor, 60, 150);
+    // into a black void once you're near the world boundary.
+    this.scene.fog = new THREE.Fog(skyColor, 120, 300);
 
     this.renderer = new THREE.WebGLRenderer();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -73,15 +73,23 @@ export class GameScene {
   }
 
   setupEnvironment() {
-    // Ground
-    const groundGeometry = new THREE.BoxGeometry(100, 1, 100);
-    const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x33aa33 });
+    // Ground -- pastel cement rather than grass
+    const groundGeometry = new THREE.BoxGeometry(WORLD_SIZE, 1, WORLD_SIZE);
+    const groundMaterial = new THREE.MeshStandardMaterial({ color: 0xbdb9ae });
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.position.y = -0.5;
     this.scene.add(ground);
 
+    // Plaza pavement (purely cosmetic -- the monument's collision box lives
+    // in BUILDINGS below).
+    const plazaGeometry = new THREE.BoxGeometry(PLAZA.size, 0.15, PLAZA.size);
+    const plazaMaterial = new THREE.MeshStandardMaterial({ color: 0xd8d3c4 });
+    const plaza = new THREE.Mesh(plazaGeometry, plazaMaterial);
+    plaza.position.set(PLAZA.x, 0.08, PLAZA.z);
+    this.scene.add(plaza);
+
     // Buildings (collision bounds for these live in utils/collision.js)
-    const buildingMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
+    const defaultBuildingMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
 
     BUILDINGS.forEach(building => {
       const geometry = new THREE.BoxGeometry(
@@ -89,10 +97,41 @@ export class GameScene {
         building.height,
         building.halfDepth * 2
       );
-      const mesh = new THREE.Mesh(geometry, buildingMaterial);
+      const material = building.color
+        ? new THREE.MeshStandardMaterial({ color: building.color })
+        : defaultBuildingMaterial;
+      const mesh = new THREE.Mesh(geometry, material);
       mesh.position.set(building.x, building.height / 2, building.z);
       this.scene.add(mesh);
+
+      if (building.label) {
+        const label = this.createBuildingLabel(building.label);
+        label.position.set(building.x, building.height + 3, building.z);
+        this.scene.add(label);
+      }
     });
+  }
+
+  // A billboard sprite so labels like "STORE" stay readable from both
+  // first-person and top-down camera modes.
+  createBuildingLabel(text) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 40px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(10, 2.5, 1);
+    return sprite;
   }
 
   setupEventListeners() {
@@ -270,16 +309,9 @@ export class GameScene {
 
   handleRespawn() {
     if (this.localPlayer) {
-      // Generate new position
-      const x = Math.random() * 80 - 40; // -40 to 40
-      const z = Math.random() * 80 - 40; // -40 to 40
-      const position = { x, y: 1, z };
-      
-      // Send respawn request to server
-      this.network.socket.emit('respawn', position);
-      
-      // Update local position immediately
-      this.localPlayer.setPosition(position);
+      // Server picks the position (HQ for Enforcers, anywhere for
+      // Criminals) and echoes it back via 'playerRespawned'.
+      this.network.socket.emit('respawn');
       this.localPlayer.respawn();
     }
   }
