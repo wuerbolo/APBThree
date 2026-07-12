@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { resolveBuildingCollision } from '../utils/collision.js';
+import { getFactionColor as resolveFactionColor, DEAD_COLOR } from '../utils/factionColors.js';
 
 export class Player {
   constructor(id, isLocal = false) {
@@ -145,74 +146,31 @@ export class Player {
   }
 
   getFactionColor() {
-    if (!this.character) return this.isLocal ? 0x00ff00 : 0xff0000;
-    
-    // Get colors based on faction
-    switch(this.character.faction) {
-      case "Criminal":
-        return this.isLocal ? 0x8b0000 : 0xd32f2f; // Dark red for local, bright red for remote
-      case "Enforcer":
-        return this.isLocal ? 0x00008b : 0x1976d2; // Dark blue for local, bright blue for remote
-      case "Civilian":
-        return this.isLocal ? 0x006400 : 0x388e3c; // Dark green for local, bright green for remote
-      default:
-        return this.isLocal ? 0x00ff00 : 0xff0000; // Default colors
-    }
-  }
-  
-  setFaction(faction) {
-    if (!this.character) this.character = {};
-    if (this.character.faction !== faction) {
-      this.character.faction = faction;
-      if (this.isAlive) {
-        this.mesh.material.color.setHex(this.getFactionColor());
-      }
-      this.updateHealthBar();
-    }
+    return resolveFactionColor(this.character?.faction, this.isLocal);
   }
 
-  takeDamage(damage) {
-    this.health = Math.max(0, this.health - damage);
-    this.isAlive = this.health > 0;
-    this.updateHealthBar();
-
-    // Update material color based on health and alive status
-    if (!this.isAlive) {
-      this.mesh.material.color.setHex(0x333333); // Grey when dead
-    } else if (this.character) {
-      // Use faction-based colors
+  // Sets/updates this player's character data and recolors the mesh to
+  // match their faction. Call this anywhere character data arrives --
+  // creation, server updates for you, or for a remote player who picks
+  // their faction after you're already connected.
+  applyCharacter(character) {
+    this.character = character;
+    if (this.isAlive) {
       this.mesh.material.color.setHex(this.getFactionColor());
-    } else {
-      // Default colors if no character (shouldn't happen once character system is fully implemented)
-      const healthFactor = this.health / 100;
-      if (this.isLocal) {
-        this.mesh.material.color.setRGB(0, healthFactor, 0); // Green varying with health
-      } else {
-        this.mesh.material.color.setRGB(1, healthFactor, healthFactor); // Red varying with health
-      }
     }
-
-    return this.isAlive;
+    this.updateHealthBar();
   }
 
-  heal(amount) {
-    this.health = Math.min(100, this.health + amount);
-    this.isAlive = true;
+  // Server is the source of truth for health/alive state; this applies an
+  // authoritative update rather than a local delta. Always recolors to the
+  // faction color when alive, DEAD_COLOR when not -- no health-based
+  // dimming, so a low-health teammate doesn't start looking like a
+  // different faction.
+  applyHealthUpdate(health, isAlive) {
+    this.health = health;
+    this.isAlive = isAlive;
     this.updateHealthBar();
-    
-    // Update color based on health and faction
-    if (this.character) {
-      this.mesh.material.color.setHex(this.getFactionColor());
-    } else {
-      // Default behavior
-      if (this.isLocal) {
-        this.mesh.material.color.setRGB(0, 1, 0); // Full green for local
-      } else {
-        this.mesh.material.color.setRGB(1, 0, 0); // Full red for remote
-      }
-    }
-    
-    return this.health;
+    this.mesh.material.color.setHex(isAlive ? this.getFactionColor() : DEAD_COLOR);
   }
 
   update(cameraMode, camera) {
@@ -308,13 +266,9 @@ export class Player {
     this.velocityY = 0;
     this.isJumping = false;
 
-    // Reset material color to full health color based on player type
-    if (this.isLocal) {
-      this.mesh.material.color.setRGB(0, 1, 0); // Full green for local player
-    } else {
-      this.mesh.material.color.setRGB(1, 0, 0); // Full red for remote player
-    }
-    
+    // Back to your faction color, not a hardcoded local=green/remote=red
+    this.mesh.material.color.setHex(this.getFactionColor());
+
     // Update health bar
     this.updateHealthBar();
   }

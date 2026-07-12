@@ -193,9 +193,9 @@ export class GameScene {
     this.scene.add(player.mesh);
     player.setPosition(position);
     
-    // Store character data if available
+    // Store character data if available, and recolor to match their faction
     if (characterData) {
-      player.character = characterData;
+      player.applyCharacter(characterData);
     }
     
     this.remotePlayers.set(id, player);
