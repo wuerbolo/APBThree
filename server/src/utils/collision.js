@@ -30,3 +30,21 @@ export function resolveBuildingCollision(position) {
 
   return position;
 }
+
+const MIN_ENTITY_DISTANCE = BODY_RADIUS * 2;
+
+export function resolveEntityCollision(position, others) {
+  for (const other of others) {
+    const dx = position.x - other.x;
+    const dz = position.z - other.z;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+
+    if (distance === 0 || distance >= MIN_ENTITY_DISTANCE) continue;
+
+    const overlap = MIN_ENTITY_DISTANCE - distance;
+    position.x += (dx / distance) * overlap;
+    position.z += (dz / distance) * overlap;
+  }
+
+  return position;
+}

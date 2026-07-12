@@ -32,3 +32,26 @@ export function resolveBuildingCollision(position) {
 
   return position;
 }
+
+// Two body radii apart is "touching"; anything closer gets pushed apart.
+const MIN_ENTITY_DISTANCE = BODY_RADIUS * 2;
+
+// Pushes (x, z) out of any position in `others` closer than MIN_ENTITY_DISTANCE,
+// along the line between the two centers. `others` is a list of { x, z }
+// positions (players, NPCs -- anything with a body). Mutates and returns
+// the same object.
+export function resolveEntityCollision(position, others) {
+  for (const other of others) {
+    const dx = position.x - other.x;
+    const dz = position.z - other.z;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+
+    if (distance === 0 || distance >= MIN_ENTITY_DISTANCE) continue;
+
+    const overlap = MIN_ENTITY_DISTANCE - distance;
+    position.x += (dx / distance) * overlap;
+    position.z += (dz / distance) * overlap;
+  }
+
+  return position;
+}

@@ -287,7 +287,15 @@ export class GameScene {
   update() {
     // Update local player
     if (this.localPlayer) {
-      this.localPlayer.update(this.cameraMode, this.camera);
+      const otherPositions = [];
+      this.remotePlayers.forEach(player => {
+        if (player.isAlive) otherPositions.push(player.mesh.position);
+      });
+      this.npcs.forEach(npc => {
+        if (npc.isAlive) otherPositions.push(npc.mesh.position);
+      });
+
+      this.localPlayer.update(this.cameraMode, this.camera, otherPositions);
       this.network.sendPosition(this.localPlayer.getPosition());
     }
 
