@@ -44,8 +44,17 @@ export class NPCModel {
     this.position.x = Math.max(-50, Math.min(50, this.position.x));
     this.position.z = Math.max(-50, Math.min(50, this.position.z));
 
-    // Don't wander into buildings
+    // If a building blocked this step, the current target is behind/inside
+    // it and the distance-to-target check above will never trip (the
+    // corrected position keeps sitting at roughly the same distance from an
+    // unreachable target) -- without this the NPC freezes at the wall
+    // forever instead of just picking somewhere else to go.
+    const beforeX = this.position.x;
+    const beforeZ = this.position.z;
     resolveBuildingCollision(this.position);
+    if (this.position.x !== beforeX || this.position.z !== beforeZ) {
+      this.targetPosition = this.getNewTargetPosition();
+    }
 
     return this.position;
   }
