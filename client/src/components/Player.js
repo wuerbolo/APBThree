@@ -34,6 +34,9 @@ export class Player {
     this.jumpSpeed = 0.28;
     this.gravity = 0.015;
 
+    // Knockback impulse from being hit; decays each frame.
+    this.knockback = { x: 0, z: 0 };
+
     // Create health bar
     this.createHealthBar();
 
@@ -173,6 +176,13 @@ export class Player {
     this.mesh.material.color.setHex(isAlive ? this.getFactionColor() : DEAD_COLOR);
   }
 
+  // Nudges the player away from wherever they just got hit from; decays
+  // to zero over the following frames in update().
+  applyKnockback(dx, dz) {
+    this.knockback.x += dx;
+    this.knockback.z += dz;
+  }
+
   update(cameraMode, camera, otherPositions = []) {
     if (!this.isLocal || !this.isAlive) return;
 
@@ -205,6 +215,14 @@ export class Player {
       this.moveVector.normalize().multiplyScalar(moveDistance);
       this.mesh.position.add(this.moveVector);
     }
+
+    // Apply and decay any knockback impulse from a recent hit
+    this.mesh.position.x += this.knockback.x;
+    this.mesh.position.z += this.knockback.z;
+    this.knockback.x *= 0.85;
+    this.knockback.z *= 0.85;
+    if (Math.abs(this.knockback.x) < 0.02) this.knockback.x = 0;
+    if (Math.abs(this.knockback.z) < 0.02) this.knockback.z = 0;
 
     // Keep player within bounds
     this.mesh.position.x = Math.max(-WORLD_HALF, Math.min(WORLD_HALF, this.mesh.position.x));

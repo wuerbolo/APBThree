@@ -3,6 +3,36 @@ export class HUD {
         this.gameScene = gameScene;
     }
 
+    // Brief red vignette flash when the local player takes damage.
+    flashDamage() {
+        let flash = document.getElementById('damage-flash');
+        if (!flash) {
+            flash = document.createElement('div');
+            flash.id = 'damage-flash';
+            flash.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: radial-gradient(circle, rgba(255,0,0,0) 55%, rgba(255,0,0,0.55) 100%);
+                pointer-events: none;
+                z-index: 900;
+                transition: opacity 0.3s ease-out;
+                opacity: 0;
+            `;
+            document.body.appendChild(flash);
+        }
+
+        // Restart the fade even if a previous flash is still fading out.
+        flash.style.transition = 'none';
+        flash.style.opacity = '1';
+        requestAnimationFrame(() => {
+            flash.style.transition = 'opacity 0.3s ease-out';
+            flash.style.opacity = '0';
+        });
+    }
+
     showDeathOverlay() {
         const overlay = document.createElement('div');
         overlay.style.cssText = `
@@ -127,29 +157,21 @@ export class HUD {
         
         const criminalButton = this.createFactionButton('Criminal', '#d32f2f', 'Operate outside the law, gain reputation by defeating Enforcers.');
         const enforcerButton = this.createFactionButton('Enforcer', '#1976d2', 'Uphold the law, gain reputation by defeating Criminals.');
-        const civilianButton = this.createFactionButton('Civilian', '#388e3c', 'Neutral faction that can be targeted by anyone.');
-        
+
         criminalButton.onclick = () => {
             const name = nameInput.value || `Criminal${Math.floor(Math.random() * 1000)}`;
             this.selectFaction('Criminal', name);
             overlay.remove();
         };
-        
+
         enforcerButton.onclick = () => {
             const name = nameInput.value || `Enforcer${Math.floor(Math.random() * 1000)}`;
             this.selectFaction('Enforcer', name);
             overlay.remove();
         };
-        
-        civilianButton.onclick = () => {
-            const name = nameInput.value || `Civilian${Math.floor(Math.random() * 1000)}`;
-            this.selectFaction('Civilian', name);
-            overlay.remove();
-        };
-        
+
         buttonsContainer.appendChild(criminalButton);
         buttonsContainer.appendChild(enforcerButton);
-        buttonsContainer.appendChild(civilianButton);
         
         overlay.appendChild(title);
         overlay.appendChild(nameInput);

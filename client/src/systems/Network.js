@@ -23,7 +23,7 @@ export class NetworkSystem {
   }
 
   setupSocketHandlers() {
-    this.socket.on('init', ({ id, position, players, npcs, character, hasCharacter }) => {
+    this.socket.on('init', ({ id, position, players, npcs, pickups, character, hasCharacter }) => {
       console.log('Connected with ID:', id);
       
       // Check if player has a character
@@ -61,6 +61,19 @@ export class NetworkSystem {
       npcs.forEach(({ id, position }) => {
         this.gameScene.addNPC(id, position);
       });
+
+      // Initialize any money pickups already on the ground
+      (pickups || []).forEach(({ id, position }) => {
+        this.gameScene.addMoneyPickup(id, position);
+      });
+    });
+
+    this.socket.on('spawnMoneyPickup', ({ id, position }) => {
+      this.gameScene.addMoneyPickup(id, position);
+    });
+
+    this.socket.on('removeMoneyPickup', (id) => {
+      this.gameScene.removeMoneyPickup(id);
     });
 
     // Character updates
@@ -124,7 +137,7 @@ export class NetworkSystem {
       this.gameScene.handleRemoteShot(id, position, direction);
     });
 
-    this.socket.on('updateHealth', ({ id, health, isAlive, isNPC, faction }) => {
+    this.socket.on('updateHealth', ({ id, health, isAlive, isNPC, faction, attackerPosition }) => {
       console.log(`Received health update: ${id} (${isNPC ? 'NPC' : 'Player'}) - Health: ${health}, Alive: ${isAlive}, Faction: ${faction || 'Unknown'}`);
       
       if (isNPC) {
@@ -153,6 +166,11 @@ export class NetworkSystem {
           const oldHealth = player.health;
           player.applyHealthUpdate(health, isAlive);
           console.log(`Player ${id} health changed from ${oldHealth} to ${health}`);
+
+          // Camera shake/flash/knockback feedback for the local player getting hit
+          if (id === this.socket.id && health < oldHealth) {
+            this.gameScene.triggerHitFeedback(attackerPosition);
+          }
 
           // Show death overlay for local player when they die
           if (id === this.socket.id && oldHealth > 0 && health <= 0) {

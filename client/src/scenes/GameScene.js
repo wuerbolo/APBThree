@@ -17,7 +17,12 @@ export class GameScene {
     this.remotePlayers = new Map();
     this.npcs = new Map();
     this.projectiles = new Map();
+    this.moneyPickups = new Map();
     this.character = null; // Store character data
+
+    // Camera shake, triggered by triggerHitFeedback()
+    this.shakeUntil = 0;
+    this.SHAKE_DURATION = 300;
     
     // Camera controls
     this.cameraMode = 'firstPerson';
@@ -279,6 +284,38 @@ export class GameScene {
     }
   }
 
+  // Cash dropped by a killed Civilian -- walk over it to collect.
+  addMoneyPickup(id, position) {
+    const geometry = new THREE.BoxGeometry(0.6, 0.3, 0.9);
+    const material = new THREE.MeshStandardMaterial({ color: 0x4caf50 });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(position.x, 0.3, position.z);
+    this.scene.add(mesh);
+    this.moneyPickups.set(id, mesh);
+  }
+
+  removeMoneyPickup(id) {
+    const mesh = this.moneyPickups.get(id);
+    if (mesh) {
+      this.scene.remove(mesh);
+      this.moneyPickups.delete(id);
+    }
+  }
+
+  // Screen shake + red flash + a shove away from the attacker, triggered by
+  // the local player taking damage.
+  triggerHitFeedback(attackerPosition) {
+    this.shakeUntil = Date.now() + this.SHAKE_DURATION;
+    this.hud.flashDamage();
+
+    if (this.localPlayer && attackerPosition) {
+      const dx = this.localPlayer.mesh.position.x - attackerPosition.x;
+      const dz = this.localPlayer.mesh.position.z - attackerPosition.z;
+      const distance = Math.sqrt(dx * dx + dz * dz) || 1;
+      this.localPlayer.applyKnockback((dx / distance) * 0.6, (dz / distance) * 0.6);
+    }
+  }
+
   handleRemoteShot(id, position, direction) {
     if (!this.projectiles.has(id)) {
       const mesh = new THREE.Mesh(
@@ -412,6 +449,17 @@ export class GameScene {
       });
     });
 
+    // Collect any money pickup the local player is standing on
+    if (this.localPlayer) {
+      const collectRadius = 2;
+      this.moneyPickups.forEach((mesh, id) => {
+        if (this.localPlayer.mesh.position.distanceTo(mesh.position) < collectRadius) {
+          this.network.socket.emit('collectMoney', id);
+          this.removeMoneyPickup(id);
+        }
+      });
+    }
+
     // Update camera
     if (this.localPlayer) {
       if (this.cameraMode === 'firstPerson') {
@@ -427,6 +475,15 @@ export class GameScene {
           this.localPlayer.mesh.position.z + this.TOPDOWN_HEIGHT
         );
         this.camera.rotation.set(this.TOPDOWN_ANGLE, 0, 0);
+      }
+
+      // Hit shake -- decaying random jitter for the remainder of SHAKE_DURATION
+      const shakeRemaining = this.shakeUntil - Date.now();
+      if (shakeRemaining > 0) {
+        const intensity = (shakeRemaining / this.SHAKE_DURATION) * 0.3;
+        this.camera.position.x += (Math.random() - 0.5) * intensity;
+        this.camera.position.y += (Math.random() - 0.5) * intensity;
+        this.camera.position.z += (Math.random() - 0.5) * intensity;
       }
     }
 

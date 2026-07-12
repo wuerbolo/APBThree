@@ -23,6 +23,8 @@ export class NetworkSystem {
 
     this.players = new Map();
     this.npcs = new Map();
+    this.moneyPickups = new Map();
+    this.nextPickupSequence = 0;
 
     // Per-socket sliding-window limits on the noisiest events. A normal
     // player's input loop stays well under these; a script hammering the
@@ -81,6 +83,11 @@ export class NetworkSystem {
             position: npc.getPosition(),
             health: npc.getHealth()
           })),
+          pickups: Array.from(this.moneyPickups.entries()).map(([id, pickup]) => ({
+            id,
+            position: pickup.position,
+            amount: pickup.amount
+          })),
           character: existingCharacter.getData(),
           hasCharacter: true
         });
@@ -98,6 +105,11 @@ export class NetworkSystem {
             id,
             position: npc.getPosition(),
             health: npc.getHealth()
+          })),
+          pickups: Array.from(this.moneyPickups.entries()).map(([id, pickup]) => ({
+            id,
+            position: pickup.position,
+            amount: pickup.amount
           })),
           hasCharacter: false
         });
@@ -224,22 +236,29 @@ export class NetworkSystem {
             if (!isAlive) {
               console.log(`NPC ${targetId} died!`);
               this.npcSpawner.onNPCDeath(targetId);
-              
-              // Award money to player who killed NPC
+
               const playerWhoKilled = attacker;
               if (playerWhoKilled.hasCharacter()) {
                 const character = playerWhoKilled.getCharacter();
-                character.money += 10; // Award 10 money per kill
+                let changed = false;
+
+                if (npcFaction === "Civilian") {
+                  // Civilians drop cash on the ground instead of paying out instantly
+                  this.spawnMoneyPickup(npc.position, 10);
+                } else {
+                  character.money += 10; // Award 10 money per kill
+                  changed = true;
+                }
 
                 // Reputation only for putting down a rival-faction NPC --
                 // Civilians are neutral and don't count.
                 if (npcFaction !== "Civilian" && npcFaction !== attackerFaction) {
                   character.reputation += 10;
                   character.updateLevel();
+                  changed = true;
                 }
 
-                // Notify player of reward
-                socket.emit('characterUpdated', character.getData());
+                if (changed) socket.emit('characterUpdated', character.getData());
               }
             }
           } else {
@@ -274,9 +293,10 @@ export class NetworkSystem {
               health: targetPlayer.health,
               isAlive: targetPlayer.isAlive,
               isNPC: false,
-              faction: targetFaction
+              faction: targetFaction,
+              attackerPosition: attacker.getPosition()
             });
-            
+
             // If player died and was previously alive
             if (wasAlive && !targetPlayer.isAlive) {
               console.log(`Player ${targetId} was killed by ${socket.id}!`);
@@ -342,6 +362,30 @@ export class NetworkSystem {
         }
       });
 
+      // Handle picking up dropped cash
+      socket.on('collectMoney', (pickupId) => {
+        const pickup = this.moneyPickups.get(pickupId);
+        if (!pickup) return; // already collected
+
+        const player = this.players.get(socket.id);
+        if (!player) return;
+
+        // Loose sanity check -- ignore requests for pickups nowhere near
+        // the player (stale client state, or someone poking the event by hand).
+        const dx = player.position.x - pickup.position.x;
+        const dz = player.position.z - pickup.position.z;
+        if (Math.sqrt(dx * dx + dz * dz) > 5) return;
+
+        this.moneyPickups.delete(pickupId);
+        this.io.emit('removeMoneyPickup', pickupId);
+
+        if (player.hasCharacter()) {
+          const character = player.getCharacter();
+          character.money += pickup.amount;
+          socket.emit('characterUpdated', character.getData());
+        }
+      });
+
       // Handle respawn events
       socket.on('respawn', () => {
         const player = this.players.get(socket.id);
@@ -380,6 +424,13 @@ export class NetworkSystem {
         this.damageLimiter.clear(socket.id);
       });
     });
+  }
+
+  // Cash dropped by a killed Civilian, collected by walking over it.
+  spawnMoneyPickup(position, amount) {
+    const id = `pickup-${Date.now()}-${this.nextPickupSequence++}`;
+    this.moneyPickups.set(id, { position, amount });
+    this.io.emit('spawnMoneyPickup', { id, position, amount });
   }
 
   startNPCLoop() {
@@ -422,6 +473,7 @@ export class NetworkSystem {
   // An Enforcer/Criminal NPC caught up to an opposing-faction player and is
   // in range -- deal damage the same way a player-vs-player hit would.
   applyNPCAttack(npcId, targetId, amount) {
+    const attackerNpc = this.npcs.get(npcId);
     const targetPlayer = this.players.get(targetId);
     if (!targetPlayer || !targetPlayer.isAlive) return;
 
@@ -435,7 +487,8 @@ export class NetworkSystem {
       health: targetPlayer.health,
       isAlive: targetPlayer.isAlive,
       isNPC: false,
-      faction: targetFaction
+      faction: targetFaction,
+      attackerPosition: attackerNpc ? attackerNpc.position : null
     });
 
     if (!targetPlayer.isAlive) {
