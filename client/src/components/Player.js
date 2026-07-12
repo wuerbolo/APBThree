@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { resolveBuildingCollision } from '../utils/collision.js';
+import { resolveBuildingCollision, resolveEntityCollision } from '../utils/collision.js';
 
 export class Player {
   constructor(id, isLocal = false) {
@@ -212,7 +212,7 @@ export class Player {
     return this.health;
   }
 
-  update(cameraMode, camera) {
+  update(cameraMode, camera, otherPositions = []) {
     if (!this.isLocal || !this.isAlive) return;
 
     const moveDistance = this.moveSpeed;
@@ -249,8 +249,9 @@ export class Player {
     this.mesh.position.x = Math.max(-50, Math.min(50, this.mesh.position.x));
     this.mesh.position.z = Math.max(-50, Math.min(50, this.mesh.position.z));
 
-    // Push back out of any building we just walked into
+    // Push back out of any building or other player/NPC we just walked into
     resolveBuildingCollision(this.mesh.position);
+    resolveEntityCollision(this.mesh.position, otherPositions);
 
     // Jump / gravity
     this.velocityY -= this.gravity;

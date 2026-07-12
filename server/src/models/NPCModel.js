@@ -1,4 +1,4 @@
-import { resolveBuildingCollision } from '../utils/collision.js';
+import { resolveBuildingCollision, resolveEntityCollision } from '../utils/collision.js';
 
 export class NPCModel {
   constructor(id, position, faction = null) {
@@ -12,7 +12,7 @@ export class NPCModel {
 
     // Chase AI (Enforcer <-> Criminal only; Civilian NPCs never chase)
     this.chaseSpeed = 0.32;
-    this.chaseRange = 20;
+    this.chaseRange = 30;
     this.attackRange = 2.5;
     this.attackCooldown = 1000;
     this.attackDamage = 8;
@@ -87,14 +87,22 @@ export class NPCModel {
     this.position.x = Math.max(-50, Math.min(50, this.position.x));
     this.position.z = Math.max(-50, Math.min(50, this.position.z));
 
-    // If a building blocked this step, the current target is behind/inside
-    // it and the distance-to-target check above will never trip (the
-    // corrected position keeps sitting at roughly the same distance from an
-    // unreachable target) -- without this the NPC freezes at the wall
-    // forever instead of just picking somewhere else to go.
+    // If a building or another body blocked this step, the current target
+    // is behind/inside it and the distance-to-target check above will
+    // never trip (the corrected position keeps sitting at roughly the same
+    // distance from an unreachable target) -- without this the NPC freezes
+    // in place forever instead of just picking somewhere else to go.
     const beforeX = this.position.x;
     const beforeZ = this.position.z;
     resolveBuildingCollision(this.position);
+
+    const others = [];
+    for (const player of alivePlayers) others.push(player.position);
+    for (const npc of aliveNpcs) {
+      if (npc.id !== this.id) others.push(npc.position);
+    }
+    resolveEntityCollision(this.position, others);
+
     if ((this.position.x !== beforeX || this.position.z !== beforeZ) && !target) {
       this.targetPosition = this.getNewTargetPosition();
     }
