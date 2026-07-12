@@ -347,6 +347,82 @@ export class HUD {
         panel.innerHTML = `<div style="font-weight:bold; margin-bottom:4px;">Fame / Infamy</div>${rows}`;
     }
 
+    // --- Missions ----------------------------------------------------------
+
+    ensureMissionPanel() {
+        let panel = document.getElementById('mission-panel');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'mission-panel';
+            panel.style.cssText = `
+                position: fixed;
+                bottom: 20px;
+                left: 10px;
+                background-color: rgba(0, 0, 0, 0.75);
+                color: white;
+                padding: 12px 15px;
+                border-radius: 5px;
+                border-left: 4px solid #ffb74d;
+                font-family: Arial, sans-serif;
+                font-size: 14px;
+                z-index: 100;
+                max-width: 320px;
+            `;
+            document.body.appendChild(panel);
+        }
+        return panel;
+    }
+
+    hasPendingMissionOffer() {
+        return !!this._pendingMissionOffer;
+    }
+
+    showMissionOffer(offer) {
+        this._pendingMissionOffer = true;
+        const panel = this.ensureMissionPanel();
+        panel.innerHTML = `
+            <div style="font-weight: bold; color: #ffb74d; margin-bottom: 3px;">NEW JOB: ${offer.title}</div>
+            <div style="opacity: 0.85; margin-bottom: 6px;">${offer.description}</div>
+            <div style="opacity: 0.7; font-size: 13px;">Reward: $${offer.rewardMoney} + ${offer.rewardRep} rep</div>
+            <div style="color: #ffe082; margin-top: 6px; font-weight: bold;">[M] Accept</div>
+        `;
+    }
+
+    showMissionTracker(update) {
+        this._pendingMissionOffer = false;
+        const panel = this.ensureMissionPanel();
+        panel.innerHTML = `
+            <div style="font-weight: bold; color: #ffb74d; margin-bottom: 3px;">${update.title}</div>
+            <div>${update.objective}</div>
+        `;
+    }
+
+    // Flash a completion/failure message, then clear the panel.
+    showMissionResult(html) {
+        this._pendingMissionOffer = false;
+        const panel = this.ensureMissionPanel();
+        panel.innerHTML = html;
+        clearTimeout(this._missionResultTimer);
+        this._missionResultTimer = setTimeout(() => {
+            const p = document.getElementById('mission-panel');
+            if (p) p.remove();
+        }, 5000);
+    }
+
+    showMissionCompleted(data) {
+        this.showMissionResult(`
+            <div style="font-weight: bold; color: #81c784; margin-bottom: 3px;">MISSION COMPLETE: ${data.title}</div>
+            <div>+$${data.rewardMoney}, +${data.rewardRep} rep</div>
+        `);
+    }
+
+    showMissionFailed(data) {
+        this.showMissionResult(`
+            <div style="font-weight: bold; color: #ff5252; margin-bottom: 3px;">MISSION FAILED</div>
+            <div style="opacity: 0.85;">${data.reason}</div>
+        `);
+    }
+
     // --- Shop --------------------------------------------------------------
 
     showShopPrompt() {

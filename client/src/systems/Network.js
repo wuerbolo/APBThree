@@ -173,6 +173,28 @@ export class NetworkSystem {
       this.gameScene.hud.updateLeaderboard(entries);
     });
 
+    // Missions
+    this.socket.on('missionOffer', (offer) => {
+      this.gameScene.hud.showMissionOffer(offer);
+    });
+
+    this.socket.on('missionUpdate', (update) => {
+      this.gameScene.hud.showMissionTracker(update);
+      this.gameScene.setMissionBeacon(update.beacon);
+    });
+
+    this.socket.on('missionCompleted', (data) => {
+      sound.missionComplete();
+      this.gameScene.clearMissionBeacon();
+      this.gameScene.hud.showMissionCompleted(data);
+    });
+
+    this.socket.on('missionFailed', (data) => {
+      sound.missionFail();
+      this.gameScene.clearMissionBeacon();
+      this.gameScene.hud.showMissionFailed(data);
+    });
+
     this.socket.on('updateHealth', ({ id, health, isAlive, isNPC, faction, attackerPosition }) => {
       console.log(`Received health update: ${id} (${isNPC ? 'NPC' : 'Player'}) - Health: ${health}, Alive: ${isAlive}, Faction: ${faction || 'Unknown'}`);
       
