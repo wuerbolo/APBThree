@@ -25,12 +25,15 @@ export class HUD {
         }
 
         // Restart the fade even if a previous flash is still fading out.
+        // The transition:none -> opacity:1 -> transition:opacity write below
+        // needs a forced reflow in between, or the browser can batch both
+        // writes into a single paint and the flash never becomes visible --
+        // rAF alone doesn't guarantee a paint happens between the two.
         flash.style.transition = 'none';
         flash.style.opacity = '1';
-        requestAnimationFrame(() => {
-            flash.style.transition = 'opacity 0.3s ease-out';
-            flash.style.opacity = '0';
-        });
+        void flash.offsetWidth;
+        flash.style.transition = 'opacity 0.3s ease-out';
+        flash.style.opacity = '0';
     }
 
     showDeathOverlay() {
