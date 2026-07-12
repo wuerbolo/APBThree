@@ -218,12 +218,19 @@ export class NetworkSystem {
               console.log(`NPC ${targetId} died!`);
               this.npcSpawner.onNPCDeath(targetId);
               
-              // Award XP or money to player who killed NPC
+              // Award money to player who killed NPC
               const playerWhoKilled = attacker;
               if (playerWhoKilled.hasCharacter()) {
                 const character = playerWhoKilled.getCharacter();
                 character.money += 10; // Award 10 money per kill
-                
+
+                // Reputation only for putting down a rival-faction NPC --
+                // Civilians are neutral and don't count.
+                if (npcFaction !== "Civilian" && npcFaction !== attackerFaction) {
+                  character.reputation += 10;
+                  character.updateLevel();
+                }
+
                 // Notify player of reward
                 socket.emit('characterUpdated', character.getData());
               }
@@ -281,7 +288,8 @@ export class NetworkSystem {
                   // but keep this as a fallback
                   killerChar.reputation -= 10;
                 }
-                
+                killerChar.updateLevel();
+
                 // Notify killer of updated character stats
                 socket.emit('characterUpdated', killerChar.getData());
               }

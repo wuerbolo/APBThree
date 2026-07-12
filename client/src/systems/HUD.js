@@ -240,7 +240,7 @@ export class HUD {
             </div>
             <div>Faction: <span style="color: ${factionColor};">${character.faction}</span></div>
             <div>Level: ${character.level}</div>
-            <div>Reputation: ${character.reputation}</div>
+            <div>Reputation: ${character.reputation} / ${character.reputationForNextLevel}</div>
             <div>Money: $${character.money}</div>
         `;
     }
