@@ -3,7 +3,7 @@ import { PlayerModel } from '../models/PlayerModel.js';
 import { NPCSpawner } from './NPCSpawner.js';
 import { CharacterSystem } from './CharacterSystem.js';
 import { RateLimiter } from '../utils/RateLimiter.js';
-import { getSpawnPositionForFaction } from '../utils/collision.js';
+import { getSpawnPositionForFaction, BUILDINGS } from '../utils/collision.js';
 import * as THREE from 'three';
 
 function getClientIp(socket) {
@@ -11,6 +11,12 @@ function getClientIp(socket) {
   if (forwarded) return forwarded.split(',')[0].trim();
   return socket.handshake.address;
 }
+
+// What the STORE sells. Server-side so the client can't invent prices.
+const WEAPON_CATALOG = {
+  shotgun: { price: 50 }
+};
+const STORE_BUY_RADIUS = 15;
 
 export class NetworkSystem {
   constructor(server) {
@@ -31,7 +37,9 @@ export class NetworkSystem {
     // server won't.
     this.positionLimiter = new RateLimiter(60, 1000);
     this.shootLimiter = new RateLimiter(10, 1000);
-    this.damageLimiter = new RateLimiter(15, 1000);
+    // High enough for a shotgun blast (6 pellets, each its own damage
+    // event) landing twice in the same second.
+    this.damageLimiter = new RateLimiter(40, 1000);
 
     // Initialize character system
     this.characterSystem = new CharacterSystem();
@@ -41,6 +49,21 @@ export class NetworkSystem {
     // Initialize NPC spawner
     this.npcSpawner = new NPCSpawner(this);
     this.startNPCLoop();
+
+    // Fame/Infamy leaderboard for everyone currently online
+    setInterval(() => this.broadcastLeaderboard(), 5000);
+  }
+
+  broadcastLeaderboard() {
+    const entries = [];
+    this.players.forEach(player => {
+      if (player.hasCharacter()) {
+        const c = player.getCharacter();
+        entries.push({ name: c.name, faction: c.faction, reputation: c.reputation, level: c.level });
+      }
+    });
+    entries.sort((a, b) => b.reputation - a.reputation);
+    this.io.emit('leaderboard', entries.slice(0, 5));
   }
 
   setupSocketHandlers() {
@@ -50,20 +73,24 @@ export class NetworkSystem {
       const clientIp = getClientIp(socket);
       console.log(`Player connected: ${socket.id} from ${clientIp}`);
 
-      // Assign initial position
-      const isFirstPlayer = this.players.size === 0;
-      const initialPosition = {
-        x: isFirstPlayer ? -40 : 40,
-        y: 1,
-        z: 0
-      };
+      // Stable identity across reconnects: the client sends a persistent
+      // token in the socket.io auth payload; characters are keyed by it so
+      // your character survives refreshes and server restarts.
+      const playerKey = String((socket.handshake.auth && socket.handshake.auth.token) || socket.id).slice(0, 64);
+
+      // Check if player has a character
+      const existingCharacter = this.characterSystem.getCharacter(playerKey);
+
+      // Returning players spawn at their faction's spawn; fresh ones get a
+      // neutral drop-in position until they pick a faction.
+      const initialPosition = existingCharacter
+        ? getSpawnPositionForFaction(existingCharacter.faction)
+        : { x: this.players.size === 0 ? -40 : 40, y: 1, z: 0 };
 
       // Create new player
       const player = new PlayerModel(socket.id, initialPosition);
+      player.characterKey = playerKey;
       this.players.set(socket.id, player);
-
-      // Check if player has a character
-      const existingCharacter = this.characterSystem.getCharacter(socket.id);
       
       if (existingCharacter) {
         // Player has a character, associate it with the player
@@ -134,7 +161,7 @@ export class NetworkSystem {
         }
         
         // Create character
-        const character = this.characterSystem.createCharacter(socket.id, name, faction);
+        const character = this.characterSystem.createCharacter(playerKey, name, faction);
         player.setCharacter(character);
 
         // Place them at their faction's spawn -- HQ for Enforcers, anywhere
@@ -249,6 +276,7 @@ export class NetworkSystem {
                 if (npcFaction !== "Civilian" && npcFaction !== attackerFaction) {
                   character.reputation += 10;
                   character.updateLevel();
+                  this.characterSystem.save();
                   socket.emit('characterUpdated', character.getData());
                 }
               }
@@ -308,6 +336,7 @@ export class NetworkSystem {
                   killerChar.reputation -= 10;
                 }
                 killerChar.updateLevel();
+                this.characterSystem.save();
 
                 // Notify killer of updated character stats
                 socket.emit('characterUpdated', killerChar.getData());
@@ -356,6 +385,35 @@ export class NetworkSystem {
         }
       });
 
+      // Handle buying a weapon at the STORE
+      socket.on('buyWeapon', (weaponId, callback) => {
+        const respond = (result) => { if (typeof callback === 'function') callback(result); };
+
+        const player = this.players.get(socket.id);
+        if (!player || !player.hasCharacter()) return respond({ success: false, error: 'No character' });
+
+        const item = WEAPON_CATALOG[weaponId];
+        if (!item) return respond({ success: false, error: 'Unknown weapon' });
+
+        const character = player.getCharacter();
+        if (character.hasWeapon(weaponId)) return respond({ success: false, error: 'Already owned' });
+
+        const store = BUILDINGS.find(b => b.label === 'STORE');
+        const dx = player.position.x - store.x;
+        const dz = player.position.z - store.z;
+        if (Math.sqrt(dx * dx + dz * dz) > STORE_BUY_RADIUS) {
+          return respond({ success: false, error: 'Too far from the store' });
+        }
+
+        if (character.money < item.price) return respond({ success: false, error: 'Not enough money' });
+
+        character.money -= item.price;
+        character.weapons.push(weaponId);
+        this.characterSystem.save();
+        console.log(`Player ${socket.id} bought ${weaponId} for $${item.price}`);
+        respond({ success: true, character: character.getData() });
+      });
+
       // Handle picking up dropped cash
       socket.on('collectMoney', (pickupId) => {
         const pickup = this.moneyPickups.get(pickupId);
@@ -376,6 +434,7 @@ export class NetworkSystem {
         if (player.hasCharacter()) {
           const character = player.getCharacter();
           character.money += pickup.amount;
+          this.characterSystem.save();
           socket.emit('characterUpdated', character.getData());
         }
       });
@@ -507,6 +566,7 @@ export class NetworkSystem {
     const character = player.getCharacter();
     character.money = 0;
     character.reputation = Math.floor(character.reputation / 2);
+    this.characterSystem.save();
     this.io.to(targetId).emit('characterPenalty', character.getData());
   }
 
