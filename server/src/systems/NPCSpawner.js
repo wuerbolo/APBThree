@@ -12,10 +12,18 @@ export class NPCSpawner {
             { x: 40, z: 40 },
             { x: 0, z: 0 }
         ];
+        // Cycles through spawnPoints in order instead of picking randomly,
+        // so NPCs spread across all corners instead of clumping wherever
+        // Math.random() happens to favor.
+        this.nextSpawnPointIndex = 0;
+        // Date.now() alone isn't unique enough -- multiple NPCs spawning in
+        // the same millisecond (e.g. the initial population burst) would
+        // collide and silently overwrite each other in this.networkSystem.npcs.
+        this.nextNpcSequence = 0;
 
         // Start queue check interval
         setInterval(this.checkQueue.bind(this), 1000);
-        
+
         // Initial spawn
         this.spawnInitialNPCs();
     }
@@ -54,9 +62,11 @@ export class NPCSpawner {
     }
 
     spawnNPC() {
-        // Get random spawn point
-        const spawnPoint = this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)];
-        
+        // Cycle through spawn points in order rather than rolling randomly
+        // each time, so population spreads across corners predictably.
+        const spawnPoint = this.spawnPoints[this.nextSpawnPointIndex];
+        this.nextSpawnPointIndex = (this.nextSpawnPointIndex + 1) % this.spawnPoints.length;
+
         // Add some randomness to spawn position
         const position = {
             x: spawnPoint.x + (Math.random() * 10 - 5),
@@ -64,8 +74,9 @@ export class NPCSpawner {
             z: spawnPoint.z + (Math.random() * 10 - 5)
         };
 
-        // Generate unique ID
-        const id = `npc-${Date.now()}`;
+        // Date.now() + an incrementing sequence -- guarantees uniqueness
+        // even when several NPCs spawn within the same millisecond.
+        const id = `npc-${Date.now()}-${this.nextNpcSequence++}`;
         
         // Create new NPC - faction will be randomly assigned in the constructor
         const npc = new NPCModel(id, position);
