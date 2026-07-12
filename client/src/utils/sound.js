@@ -82,5 +82,18 @@ export const sound = {
 
   death() {
     tone({ freq: 320, endFreq: 55, duration: 0.7, type: 'sawtooth', volume: 0.1 });
+  },
+
+  missionComplete() {
+    tone({ freq: 523, duration: 0.12, type: 'sine', volume: 0.1 });
+    tone({ freq: 659, duration: 0.12, type: 'sine', volume: 0.1, delay: 0.12 });
+    tone({ freq: 784, duration: 0.12, type: 'sine', volume: 0.1, delay: 0.24 });
+    tone({ freq: 1046, duration: 0.25, type: 'sine', volume: 0.11, delay: 0.36 });
+  },
+
+  missionFail() {
+    tone({ freq: 330, duration: 0.18, type: 'sawtooth', volume: 0.07 });
+    tone({ freq: 262, duration: 0.18, type: 'sawtooth', volume: 0.07, delay: 0.18 });
+    tone({ freq: 196, duration: 0.35, type: 'sawtooth', volume: 0.08, delay: 0.36 });
   }
 };

@@ -38,6 +38,9 @@ export class GameScene {
     // STORE building, for shop proximity checks
     this.storeBuilding = BUILDINGS.find(b => b.label === 'STORE');
     this.nearStore = false;
+
+    // Active mission beacon (pillar of light at the current objective)
+    this.missionBeacon = null;
     
     // Camera controls
     this.cameraMode = 'firstPerson';
@@ -364,6 +367,12 @@ export class GameScene {
           this.hud.openShop(this.character);
         }
       }
+      // Accept a pending mission offer
+      if ((event.key === 'm' || event.key === 'M') && this.isLocalPlayerAlive()) {
+        if (this.hud.hasPendingMissionOffer()) {
+          this.network.socket.emit('missionAccept');
+        }
+      }
     });
 
     window.addEventListener('keyup', (event) => {
@@ -548,6 +557,48 @@ export class GameScene {
     }
   }
 
+  // Tall translucent pillar marking the current mission objective, visible
+  // from anywhere; optional bouncing "package" at its base.
+  setMissionBeacon(beacon) {
+    this.clearMissionBeacon();
+    if (!beacon) return;
+
+    const group = new THREE.Group();
+    const pillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.5, 1.5, 60, 12, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0xffe082,
+        transparent: true,
+        opacity: 0.3,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      })
+    );
+    pillar.position.y = 30;
+    group.add(pillar);
+
+    if (beacon.package) {
+      const pkg = new THREE.Mesh(
+        new THREE.BoxGeometry(0.8, 0.6, 0.8),
+        new THREE.MeshStandardMaterial({ color: 0xffc107 })
+      );
+      pkg.position.y = 0.6;
+      group.add(pkg);
+      group.userData.package = pkg;
+    }
+
+    group.position.set(beacon.x, 0, beacon.z);
+    this.scene.add(group);
+    this.missionBeacon = group;
+  }
+
+  clearMissionBeacon() {
+    if (this.missionBeacon) {
+      this.scene.remove(this.missionBeacon);
+      this.missionBeacon = null;
+    }
+  }
+
   // Screen shake + red flash + a shove away from the attacker, triggered by
   // the local player taking damage.
   triggerHitFeedback(attackerPosition) {
@@ -708,6 +759,13 @@ export class GameScene {
         }
       });
     });
+
+    // Animate the mission beacon package, if any
+    if (this.missionBeacon && this.missionBeacon.userData.package) {
+      const pkg = this.missionBeacon.userData.package;
+      pkg.rotation.y += 0.03;
+      pkg.position.y = 0.6 + Math.abs(Math.sin(Date.now() / 400)) * 0.3;
+    }
 
     // Animate and collect money pickups
     this.moneyPickups.forEach((pickup, id) => {

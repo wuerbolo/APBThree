@@ -2,6 +2,7 @@ import { Server } from 'socket.io';
 import { PlayerModel } from '../models/PlayerModel.js';
 import { NPCSpawner } from './NPCSpawner.js';
 import { CharacterSystem } from './CharacterSystem.js';
+import { MissionSystem } from './MissionSystem.js';
 import { RateLimiter } from '../utils/RateLimiter.js';
 import { getSpawnPositionForFaction, BUILDINGS } from '../utils/collision.js';
 import * as THREE from 'three';
@@ -43,7 +44,10 @@ export class NetworkSystem {
 
     // Initialize character system
     this.characterSystem = new CharacterSystem();
-    
+
+    // Faction missions (multi-stage jobs with rewards)
+    this.missionSystem = new MissionSystem(this);
+
     this.setupSocketHandlers();
     
     // Initialize NPC spawner
@@ -151,6 +155,17 @@ export class NetworkSystem {
         character: player.hasCharacter() ? player.getCharacter().getData() : null
       });
 
+      // Returning players with a character get a mission offer shortly
+      // after connecting
+      if (existingCharacter) {
+        this.missionSystem.scheduleOffer(socket.id, 3000);
+      }
+
+      // Handle mission acceptance
+      socket.on('missionAccept', () => {
+        this.missionSystem.accept(socket.id);
+      });
+
       // Handle character creation
       socket.on('createCharacter', ({ name, faction }, callback) => {
         console.log(`Creating character for ${socket.id}: ${name} (${faction})`);
@@ -163,6 +178,7 @@ export class NetworkSystem {
         // Create character
         const character = this.characterSystem.createCharacter(playerKey, name, faction);
         player.setCharacter(character);
+        this.missionSystem.scheduleOffer(socket.id, 3000);
 
         // Place them at their faction's spawn -- HQ for Enforcers, anywhere
         // on the map for Criminals.
@@ -193,6 +209,7 @@ export class NetworkSystem {
         const player = this.players.get(socket.id);
         if (player) {
           player.updatePosition(position);
+          this.missionSystem.onPosition(socket.id, position);
           socket.broadcast.emit('playerMoved', {
             id: socket.id,
             position
@@ -279,6 +296,9 @@ export class NetworkSystem {
                   this.characterSystem.save();
                   socket.emit('characterUpdated', character.getData());
                 }
+
+                // Mission progress (kill objectives)
+                this.missionSystem.onNpcKill(socket.id, npcFaction);
               }
             }
           } else {
@@ -472,6 +492,7 @@ export class NetworkSystem {
         // Keep character data in memory but remove player
         this.players.delete(socket.id);
         this.io.emit('playerLeft', socket.id);
+        this.missionSystem.onDisconnect(socket.id);
         this.positionLimiter.clear(socket.id);
         this.shootLimiter.clear(socket.id);
         this.damageLimiter.clear(socket.id);
@@ -568,6 +589,7 @@ export class NetworkSystem {
     character.reputation = Math.floor(character.reputation / 2);
     this.characterSystem.save();
     this.io.to(targetId).emit('characterPenalty', character.getData());
+    this.missionSystem.onDeath(targetId);
   }
 
   // An Enforcer/Criminal NPC caught up to an opposing-faction NPC -- same
