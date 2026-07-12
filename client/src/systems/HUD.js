@@ -266,10 +266,17 @@ export class HUD {
                 <span style="color: ${factionColor};">${character.name}</span>
             </div>
             <div>Faction: <span style="color: ${factionColor};">${character.faction}</span></div>
+            <div>Health: <span id="stat-health">${this.gameScene.localPlayer ? this.gameScene.localPlayer.health : 100}</span></div>
             <div>Level: ${character.level}</div>
             <div>Reputation: <span id="stat-reputation">${character.reputation}</span> / ${character.reputationForNextLevel}</div>
             <div>Money: $<span id="stat-money">${character.money}</span></div>
         `;
+    }
+
+    // Cheap enough to call every frame -- just updates one span's text.
+    updateHealthStat(health) {
+        const healthEl = document.getElementById('stat-health');
+        if (healthEl) healthEl.textContent = Math.max(0, Math.round(health));
     }
 
     // Death penalty: roll the money/reputation numbers down from their old

@@ -382,6 +382,7 @@ export class GameScene {
 
       this.localPlayer.update(this.cameraMode, this.camera, otherPositions);
       this.network.sendPosition(this.localPlayer.getPosition());
+      this.hud.updateHealthStat(this.localPlayer.health);
     }
 
     // Update NPCs
