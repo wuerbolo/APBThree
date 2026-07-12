@@ -27,7 +27,9 @@ export class GameScene {
     this.mouseSensitivity = 0.002;
     
     // Constants
-    this.TOPDOWN_HEIGHT = 50;
+    this.TOPDOWN_HEIGHT = 20; // was 50 -- way too far out to make anything out
+    this.TOPDOWN_MIN_HEIGHT = 8;
+    this.TOPDOWN_MAX_HEIGHT = 50;
     this.TOPDOWN_ANGLE = -Math.PI / 4;
     
     // Setup systems
@@ -135,6 +137,15 @@ export class GameScene {
 
     // Shooting
     document.addEventListener('mousedown', this.handleShot.bind(this));
+
+    // Zoom the top-down camera in/out with the scroll wheel
+    document.addEventListener('wheel', (event) => {
+      if (this.cameraMode !== 'topDown') return;
+      this.TOPDOWN_HEIGHT = Math.max(
+        this.TOPDOWN_MIN_HEIGHT,
+        Math.min(this.TOPDOWN_MAX_HEIGHT, this.TOPDOWN_HEIGHT + event.deltaY * 0.05)
+      );
+    });
 
     // Window resize
     window.addEventListener('resize', () => {
