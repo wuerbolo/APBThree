@@ -270,11 +270,13 @@ export class GameScene {
       this.scene.add(bench);
     });
 
-    // Trash cans near points of interest
+    // Trash cans near points of interest. (Look the STORE up locally --
+    // setupProps runs from the constructor before this.storeBuilding is set.)
+    const store = BUILDINGS.find(b => b.label === 'STORE');
     const trashGeometry = new THREE.CylinderGeometry(0.45, 0.4, 1.1, 8);
     const trashMaterial = new THREE.MeshStandardMaterial({ color: 0x3d5245 });
     const trashSpots = [
-      { x: this.storeBuilding.x + 8, z: this.storeBuilding.z },
+      { x: store.x + 8, z: store.z },
       { x: PLAZA.x - 11, z: PLAZA.z - 11 },
       { x: PLAZA.x + 11, z: PLAZA.z + 11 },
       { x: -70, z: -50 },
