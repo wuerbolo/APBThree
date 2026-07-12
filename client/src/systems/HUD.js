@@ -65,6 +65,7 @@ export class HUD {
 
         setTimeout(() => {
             overlay.remove();
+            this.showDeathTint();
             this.showRespawnButton();
         }, 2000);
     }
@@ -100,6 +101,7 @@ export class HUD {
 
         button.onclick = () => {
             this.gameScene.handleRespawn();
+            this.hideDeathTint();
             button.remove();
         };
 
@@ -262,8 +264,63 @@ export class HUD {
             </div>
             <div>Faction: <span style="color: ${factionColor};">${character.faction}</span></div>
             <div>Level: ${character.level}</div>
-            <div>Reputation: ${character.reputation} / ${character.reputationForNextLevel}</div>
-            <div>Money: $${character.money}</div>
+            <div>Reputation: <span id="stat-reputation">${character.reputation}</span> / ${character.reputationForNextLevel}</div>
+            <div>Money: $<span id="stat-money">${character.money}</span></div>
         `;
     }
-} 
+
+    // Death penalty: roll the money/reputation numbers down from their old
+    // values to the new (post-penalty) ones, like a lock combination
+    // settling into place, instead of just snapping to the new numbers.
+    animateCharacterPenalty(oldCharacter, newCharacter) {
+        this.showCharacterInfo(newCharacter);
+        if (!oldCharacter) return;
+
+        const moneyEl = document.getElementById('stat-money');
+        const repEl = document.getElementById('stat-reputation');
+        if (moneyEl) this.rollNumber(moneyEl, oldCharacter.money, newCharacter.money);
+        if (repEl) this.rollNumber(repEl, oldCharacter.reputation, newCharacter.reputation);
+    }
+
+    rollNumber(el, from, to) {
+        const duration = 900;
+        const start = performance.now();
+
+        const step = (now) => {
+            const progress = Math.min(1, (now - start) / duration);
+            if (progress < 1) {
+                const settled = from + (to - from) * progress;
+                const jitter = (1 - progress) * Math.abs(from - to) * 0.4;
+                const displayValue = Math.round(settled + (Math.random() - 0.5) * jitter);
+                el.textContent = Math.max(0, displayValue);
+                requestAnimationFrame(step);
+            } else {
+                el.textContent = to;
+            }
+        };
+        requestAnimationFrame(step);
+    }
+
+    // Persistent dark red tint while dead -- cleared on respawn.
+    showDeathTint() {
+        if (document.getElementById('death-tint')) return;
+        const tint = document.createElement('div');
+        tint.id = 'death-tint';
+        tint.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(90, 0, 0, 0.45);
+            pointer-events: none;
+            z-index: 950;
+        `;
+        document.body.appendChild(tint);
+    }
+
+    hideDeathTint() {
+        const tint = document.getElementById('death-tint');
+        if (tint) tint.remove();
+    }
+}

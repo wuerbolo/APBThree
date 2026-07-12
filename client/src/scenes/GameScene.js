@@ -161,7 +161,7 @@ export class GameScene {
     });
 
     document.addEventListener('mousemove', (event) => {
-      if (this.isPointerLocked && this.cameraMode === 'firstPerson') {
+      if (this.isPointerLocked && this.cameraMode === 'firstPerson' && this.isLocalPlayerAlive()) {
         this.yaw -= event.movementX * this.mouseSensitivity;
         this.pitch -= event.movementY * this.mouseSensitivity;
         this.pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.pitch));
@@ -174,7 +174,7 @@ export class GameScene {
         this.localPlayer.handleKeyDown(event);
       }
       // Camera mode toggle
-      if (event.key === 'v' || event.key === 'V') {
+      if ((event.key === 'v' || event.key === 'V') && this.isLocalPlayerAlive()) {
         this.cameraMode = this.cameraMode === 'firstPerson' ? 'topDown' : 'firstPerson';
         if (this.cameraMode === 'topDown' && document.pointerLockElement) {
           document.exitPointerLock();
@@ -210,8 +210,13 @@ export class GameScene {
     });
   }
 
+  isLocalPlayerAlive() {
+    return !!this.localPlayer && this.localPlayer.isAlive;
+  }
+
   handleShot(event) {
     if (event.button !== 0) return; // Left click only
+    if (!this.isLocalPlayerAlive()) return;
 
     const projectile = {
       geometry: new THREE.SphereGeometry(0.2, 8, 8),

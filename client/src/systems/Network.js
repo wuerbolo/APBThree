@@ -58,8 +58,8 @@ export class NetworkSystem {
       });
 
       // Initialize NPCs
-      npcs.forEach(({ id, position }) => {
-        this.gameScene.addNPC(id, position);
+      npcs.forEach(({ id, position, faction }) => {
+        this.gameScene.addNPC(id, position, faction);
       });
 
       // Initialize any money pickups already on the ground
@@ -84,6 +84,14 @@ export class NetworkSystem {
       if (this.gameScene.localPlayer) {
         this.gameScene.localPlayer.applyCharacter(characterData);
       }
+    });
+
+    // Death penalty: money reset to 0, reputation halved -- animate the
+    // drop instead of just snapping to the new values.
+    this.socket.on('characterPenalty', (characterData) => {
+      const oldCharacter = this.gameScene.character;
+      this.gameScene.character = characterData;
+      this.gameScene.hud.animateCharacterPenalty(oldCharacter, characterData);
     });
 
     this.socket.on('playerUpdated', ({ id, character }) => {
