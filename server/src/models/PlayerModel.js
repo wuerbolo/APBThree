@@ -13,6 +13,14 @@ export class PlayerModel {
 
     // While jailed (arrested), position updates are ignored until released.
     this.jailedUntil = 0;
+
+    // Anti-cheat bookkeeping for the 'shoot' -> 'damage' flow: per-weapon
+    // last-fired timestamps (fire-rate enforcement) and a short-lived
+    // budget of how many 'damage' events the current shot is allowed to
+    // produce (so a shotgun's 6 pellets are legitimate but a client can't
+    // just spam extra 'damage' events off one 'shoot' call).
+    this.lastShotAt = {};
+    this.shotBudget = null; // { weapon, remaining, expiresAt }
   }
 
   isJailed() {

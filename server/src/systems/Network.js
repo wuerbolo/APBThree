@@ -50,6 +50,24 @@ const MEDKIT_HEAL = 30;
 const AIRDROP_INTERVAL_MS = 120000;
 const AIRDROP_CLAIM_RADIUS = 2.5;
 
+// Authoritative weapon stats for the 'shoot' -> 'damage' flow. The client
+// sends a weapon id and hit targets, but damage amount, fire rate and max
+// range are always taken from here -- never trusted from the client. This
+// is what stops a browser-console script from claiming 9999 damage,
+// firing a sniper at SMG speed, or landing "hits" across the whole map.
+const WEAPON_STATS = {
+  pistol: { damage: 10, cooldown: 250, maxRange: 60, pellets: 1 },
+  shotgun: { damage: 4, cooldown: 800, maxRange: 25, pellets: 6 },
+  smg: { damage: 4, cooldown: 90, maxRange: 45, pellets: 1 },
+  sniper: { damage: 50, cooldown: 1500, maxRange: 150, pellets: 1 }
+};
+// Network jitter allowance: a shot slightly under the nominal cooldown
+// isn't necessarily cheating, just latency.
+const FIRE_RATE_TOLERANCE_MS = 60;
+// Pellets from one 'shoot' call must land (as 'damage' events) within this
+// window, or the budget expires and further hits from it are rejected.
+const SHOT_BUDGET_WINDOW_MS = 1000;
+
 function randomOpenPosition() {
   return {
     x: Math.random() * (WORLD_HALF * 2 - 20) - (WORLD_HALF - 10),
@@ -548,15 +566,41 @@ export class NetworkSystem {
         }
       });
 
-      // Handle shooting
+      // Handle shooting. This is the fire-rate/ownership gate; the actual
+      // damage amount is decided in the 'damage' handler below, never here
+      // and never from the client's own numbers.
       socket.on('shoot', (data) => {
         if (!this.shootLimiter.allow(socket.id)) {
           console.warn(`Rate limit exceeded (shoot) for ${socket.id} (${clientIp}), disconnecting`);
           socket.disconnect(true);
           return;
         }
+
+        const player = this.players.get(socket.id);
+        if (!player || !player.isAlive || player.isJailed() || !player.hasCharacter()) return;
+
+        const weaponId = data.weapon || 'pistol';
+        const stats = WEAPON_STATS[weaponId];
+        if (!stats) return;
+        if (weaponId !== 'pistol' && !player.getCharacter().hasWeapon(weaponId)) {
+          console.warn(`${socket.id} tried to fire unowned weapon ${weaponId}`);
+          return;
+        }
+
+        const now = Date.now();
+        const lastShot = player.lastShotAt[weaponId] || 0;
+        if (now - lastShot < stats.cooldown - FIRE_RATE_TOLERANCE_MS) return; // firing faster than the weapon allows
+        player.lastShotAt[weaponId] = now;
+
+        // Cap pellets to what the weapon actually fires, and open a budget
+        // for the matching 'damage' events -- this is what a shotgun's 6
+        // simultaneous hits spend down.
+        const pellets = Array.isArray(data.pellets) ? data.pellets.slice(0, stats.pellets) : [];
+        player.shotBudget = { weapon: weaponId, remaining: pellets.length, expiresAt: now + SHOT_BUDGET_WINDOW_MS };
+
         socket.broadcast.emit('shoot', {
-          ...data,
+          weapon: weaponId,
+          pellets,
           playerId: socket.id
         });
       });
@@ -568,20 +612,50 @@ export class NetworkSystem {
           socket.disconnect(true);
           return;
         }
-        console.log('Received damage event:', data);
 
         // Send acknowledgment immediately
         if (callback) callback({ received: true });
-        
-        const { targetId, amount, isNPC } = data;
-        
+
+        const { targetId, isNPC } = data;
+
         // Get the attacker (the player who sent the damage event)
         const attacker = this.players.get(socket.id);
-        if (!attacker) return; // Attacker not found
-        
+        if (!attacker || !attacker.isAlive || attacker.isJailed() || !attacker.hasCharacter()) return;
+
+        // Weapon must exist, be owned, and have an open budget from a
+        // recent legitimate 'shoot' call -- this is what stops a script
+        // from emitting 'damage' events with no corresponding shot, or
+        // more hits than the weapon's pellet count allows.
+        const weaponId = data.weapon || 'pistol';
+        const stats = WEAPON_STATS[weaponId];
+        if (!stats) return;
+        if (weaponId !== 'pistol' && !attacker.getCharacter().hasWeapon(weaponId)) return;
+
+        const budget = attacker.shotBudget;
+        if (!budget || budget.weapon !== weaponId || budget.remaining <= 0 || Date.now() > budget.expiresAt) {
+          console.warn(`${socket.id} sent a damage event with no matching shot budget (weapon: ${weaponId})`);
+          return;
+        }
+        budget.remaining--;
+
+        // Authoritative damage -- the client's claimed amount is ignored
+        const amount = stats.damage;
+
+        // Range check against the server's own positions, not anything
+        // the client asserts about where the shot came from.
+        const targetEntity = isNPC ? this.npcs.get(targetId) : this.players.get(targetId);
+        if (!targetEntity) return;
+        const targetPos = isNPC ? targetEntity.position : targetEntity.getPosition();
+        const rdx = attacker.position.x - targetPos.x;
+        const rdz = attacker.position.z - targetPos.z;
+        if (Math.sqrt(rdx * rdx + rdz * rdz) > stats.maxRange) {
+          console.warn(`${socket.id} claimed an out-of-range hit with ${weaponId} on ${targetId}`);
+          return;
+        }
+
         // Check if attacker has a character with faction info
         const attackerFaction = attacker.hasCharacter() ? attacker.getCharacter().faction : null;
-        
+
         if (isNPC) {
           // Player attacking NPC
           const npc = this.npcs.get(targetId);

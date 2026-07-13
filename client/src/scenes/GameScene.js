@@ -739,6 +739,7 @@ export class GameScene {
       const mesh = this.createTracerMesh(origin, direction);
       mesh.damage = weapon.damage;
       mesh.speed = weapon.speed || 1;
+      mesh.weapon = this.currentWeapon;
       // Only the shooter's client reports damage for its own projectiles;
       // observers just render them.
       mesh.isLocal = true;
@@ -1044,7 +1045,8 @@ export class GameScene {
             this.network.sendDamage({
               targetId: player.id,
               amount: projectile.damage || 10,
-              isNPC: false
+              isNPC: false,
+              weapon: projectile.weapon
             });
           }
 
@@ -1074,7 +1076,8 @@ export class GameScene {
             this.network.sendDamage({
               targetId: npc.id,
               amount: projectile.damage || 10,
-              isNPC: true
+              isNPC: true,
+              weapon: projectile.weapon
             });
           }
 
