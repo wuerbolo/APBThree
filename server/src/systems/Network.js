@@ -19,6 +19,11 @@ function getClientIp(socket) {
 const WEAPON_CATALOG = {
   shotgun: { price: 50 }
 };
+const COSMETIC_CATALOG = {
+  cap: { price: 30 },
+  tophat: { price: 100 },
+  halo: { price: 250 }
+};
 const STORE_BUY_RADIUS = 15;
 
 export class NetworkSystem {
@@ -450,6 +455,59 @@ export class NetworkSystem {
         character.weapons.push(weaponId);
         this.characterSystem.save();
         console.log(`Player ${socket.id} bought ${weaponId} for $${item.price}`);
+        respond({ success: true, character: character.getData() });
+      });
+
+      // Handle buying a cosmetic at the STORE (auto-equips on purchase)
+      socket.on('buyCosmetic', (cosmeticId, callback) => {
+        const respond = (result) => { if (typeof callback === 'function') callback(result); };
+
+        const player = this.players.get(socket.id);
+        if (!player || !player.hasCharacter()) return respond({ success: false, error: 'No character' });
+
+        const item = COSMETIC_CATALOG[cosmeticId];
+        if (!item) return respond({ success: false, error: 'Unknown cosmetic' });
+
+        const character = player.getCharacter();
+        if (character.hasCosmetic(cosmeticId)) return respond({ success: false, error: 'Already owned' });
+
+        const store = BUILDINGS.find(b => b.label === 'STORE');
+        const dx = player.position.x - store.x;
+        const dz = player.position.z - store.z;
+        if (Math.sqrt(dx * dx + dz * dz) > STORE_BUY_RADIUS) {
+          return respond({ success: false, error: 'Too far from the store' });
+        }
+
+        if (character.money < item.price) return respond({ success: false, error: 'Not enough money' });
+
+        character.money -= item.price;
+        character.cosmetics.push(cosmeticId);
+        character.equippedCosmetic = cosmeticId;
+        this.characterSystem.save();
+        console.log(`Player ${socket.id} bought cosmetic ${cosmeticId} for $${item.price}`);
+
+        // Everyone else needs the new look too
+        socket.broadcast.emit('playerUpdated', { id: socket.id, character: character.getData() });
+        respond({ success: true, character: character.getData() });
+      });
+
+      // Handle equipping/unequipping an owned cosmetic (null = bare head).
+      // No store proximity needed -- you own it, wear it anywhere.
+      socket.on('equipCosmetic', (cosmeticId, callback) => {
+        const respond = (result) => { if (typeof callback === 'function') callback(result); };
+
+        const player = this.players.get(socket.id);
+        if (!player || !player.hasCharacter()) return respond({ success: false, error: 'No character' });
+
+        const character = player.getCharacter();
+        if (cosmeticId !== null && !character.hasCosmetic(cosmeticId)) {
+          return respond({ success: false, error: 'Not owned' });
+        }
+
+        character.equippedCosmetic = cosmeticId;
+        this.characterSystem.save();
+
+        socket.broadcast.emit('playerUpdated', { id: socket.id, character: character.getData() });
         respond({ success: true, character: character.getData() });
       });
 

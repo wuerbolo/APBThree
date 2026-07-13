@@ -6,10 +6,16 @@ export class CharacterModel {
     this.reputation = 0;
     this.money = 0;
     this.weapons = ['pistol'];
+    this.cosmetics = [];          // owned cosmetic ids
+    this.equippedCosmetic = null; // currently worn, or null
   }
 
   hasWeapon(weaponId) {
     return this.weapons.includes(weaponId);
+  }
+
+  hasCosmetic(cosmeticId) {
+    return this.cosmetics.includes(cosmeticId);
   }
 
   // Cumulative reputation needed to *reach* a given level. Doubles each
@@ -37,6 +43,8 @@ export class CharacterModel {
       reputation: this.reputation,
       money: this.money,
       weapons: this.weapons,
+      cosmetics: this.cosmetics,
+      equippedCosmetic: this.equippedCosmetic,
       reputationForNextLevel: this.getReputationForLevel(this.level + 1)
     };
   }
@@ -49,5 +57,7 @@ export class CharacterModel {
     if (data.reputation) this.reputation = data.reputation;
     if (data.money) this.money = data.money;
     if (Array.isArray(data.weapons)) this.weapons = data.weapons;
+    if (Array.isArray(data.cosmetics)) this.cosmetics = data.cosmetics;
+    if (data.equippedCosmetic !== undefined) this.equippedCosmetic = data.equippedCosmetic;
   }
 } 

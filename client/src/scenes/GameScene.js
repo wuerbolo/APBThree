@@ -162,8 +162,21 @@ export class GameScene {
     plaza.position.set(PLAZA.x, 0.08, PLAZA.z);
     this.scene.add(plaza);
 
-    // Buildings (collision bounds for these live in utils/collision.js)
-    const defaultBuildingMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
+    // Buildings (collision bounds for these live in utils/collision.js).
+    // One tiny shared canvas draws a single window; RepeatWrapping tiles it
+    // into a facade grid per building, so the whole city costs one extra
+    // texture. The map multiplies the building color, so windows read as
+    // dark glass on whatever the wall color is. Sides get windows;
+    // roof/underside stay plain via a per-face material array.
+    const windowCanvas = document.createElement('canvas');
+    windowCanvas.width = 64;
+    windowCanvas.height = 64;
+    const wctx = windowCanvas.getContext('2d');
+    wctx.fillStyle = '#ffffff';
+    wctx.fillRect(0, 0, 64, 64);
+    wctx.fillStyle = '#26313d';
+    wctx.fillRect(14, 12, 36, 38);
+    const baseWindowTexture = new THREE.CanvasTexture(windowCanvas);
 
     BUILDINGS.forEach(building => {
       const geometry = new THREE.BoxGeometry(
@@ -171,10 +184,23 @@ export class GameScene {
         building.height,
         building.halfDepth * 2
       );
-      const material = building.color
-        ? new THREE.MeshStandardMaterial({ color: building.color })
-        : defaultBuildingMaterial;
-      const mesh = new THREE.Mesh(geometry, material);
+      const color = building.color || 0x888888;
+
+      const sideTexture = baseWindowTexture.clone();
+      sideTexture.needsUpdate = true;
+      sideTexture.wrapS = THREE.RepeatWrapping;
+      sideTexture.wrapT = THREE.RepeatWrapping;
+      sideTexture.repeat.set(
+        Math.max(1, Math.round((building.halfWidth * 2) / 3)),
+        Math.max(1, Math.round(building.height / 3))
+      );
+
+      const sideMaterial = new THREE.MeshStandardMaterial({ color, map: sideTexture });
+      const plainMaterial = new THREE.MeshStandardMaterial({ color });
+      // BoxGeometry face order: +x, -x, +y (roof), -y, +z, -z
+      const mesh = new THREE.Mesh(geometry, [
+        sideMaterial, sideMaterial, plainMaterial, plainMaterial, sideMaterial, sideMaterial
+      ]);
       mesh.position.set(building.x, building.height / 2, building.z);
       this.scene.add(mesh);
 
@@ -683,6 +709,10 @@ export class GameScene {
     // Update NPCs
     this.npcs.forEach(npc => npc.update(this.camera));
 
+    // Characters rotate to face their movement direction now, so remote
+    // players' health bars need re-billboarding every frame too.
+    this.remotePlayers.forEach(player => player.updateHealthBarRotation(this.camera));
+
     // Update projectiles
     const now = Date.now();
     this.projectiles.forEach((projectile, id) => {
@@ -729,9 +759,9 @@ export class GameScene {
           // target would get stuck flashed. A single timer per target also
           // avoids a pile of pending reverts firing out of order.
           clearTimeout(player._hitFlashTimer);
-          player.mesh.material.color.setHex(0xffff00);
+          player.setBodyColorHex(0xffff00);
           player._hitFlashTimer = setTimeout(() => {
-            player.mesh.material.color.setHex(player.isAlive ? player.getFactionColor() : DEAD_COLOR);
+            player.setBodyColorHex(player.isAlive ? player.getFactionColor() : DEAD_COLOR);
           }, 100);
 
           // Remove projectile
@@ -753,9 +783,9 @@ export class GameScene {
 
           // Visual feedback (see comment on the player branch above)
           clearTimeout(npc._hitFlashTimer);
-          npc.mesh.material.color.setHex(0xff0000);
+          npc.setBodyColorHex(0xff0000);
           npc._hitFlashTimer = setTimeout(() => {
-            npc.mesh.material.color.setHex(npc.isAlive ? npc.getFactionColor() : DEAD_COLOR);
+            npc.setBodyColorHex(npc.isAlive ? npc.getFactionColor() : DEAD_COLOR);
           }, 100);
 
           // Remove projectile

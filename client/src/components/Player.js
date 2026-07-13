@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { resolveBuildingCollision, resolveEntityCollision, WORLD_HALF } from '../utils/collision.js';
 import { getFactionColor as resolveFactionColor, DEAD_COLOR } from '../utils/factionColors.js';
+import { buildCharacterMesh, animateWalk, buildHatMesh } from '../utils/characterModel.js';
 
 export class Player {
   constructor(id, isLocal = false) {
@@ -9,14 +10,15 @@ export class Player {
     this.health = 100;
     this.isAlive = true;
     this.character = null; // Store character data
-    
-    // Create mesh
-    const geometry = new THREE.BoxGeometry(2, 2, 2);
-    const material = new THREE.MeshStandardMaterial({
-      color: isLocal ? 0x00ff00 : 0xff0000 // Default colors before faction assignment
-    });
-    this.mesh = new THREE.Mesh(geometry, material);
+
+    // Low-poly humanoid rig (same 2-unit bounds as the old placeholder box)
+    this.rig = buildCharacterMesh(isLocal ? 0x00ff00 : 0xff0000);
+    this.mesh = this.rig.group;
+    this.bodyMaterial = this.rig.bodyMaterial;
+    this.hat = null;
     this.mesh.position.y = 1;
+    // For remote players: walk animation + facing driven by position deltas
+    this._lastAnimPosition = new THREE.Vector3();
 
     // Movement state
     this.keys = {
@@ -55,14 +57,33 @@ export class Player {
     barrel.position.z = -0.4;
     gunGroup.add(barrel);
 
-    // Held out to the side and slightly forward, like a raised arm.
-    // The player mesh is a 2x2x2 box (extends to +/-1 on each axis), so this
-    // has to clear x=1 or it renders buried inside the opaque body -- which
-    // is exactly the bug that made the gun invisible before.
-    gunGroup.position.set(1.3, 0, -0.3);
+    // Held at the right hand: just outside the right arm (arm pivot at
+    // x=0.56 plus arm width), around hand height, slightly forward.
+    gunGroup.position.set(0.78, -0.15, -0.3);
 
     this.gun = gunGroup;
     this.mesh.add(this.gun);
+  }
+
+  // Recolor the faction-colored surface (torso + arms). Used by faction
+  // changes, death/respawn, and the hit flash in GameScene.
+  setBodyColorHex(hex) {
+    this.bodyMaterial.color.setHex(hex);
+  }
+
+  // Swap the equipped cosmetic (hat) to match character data.
+  applyCosmetic(cosmeticId) {
+    if (this.hat) {
+      this.mesh.remove(this.hat);
+      this.hat = null;
+    }
+    if (!cosmeticId) return;
+    const hat = buildHatMesh(cosmeticId);
+    if (hat) {
+      hat.position.y = this.rig.headAnchorY;
+      this.mesh.add(hat);
+      this.hat = hat;
+    }
   }
 
   createHealthBar() {
@@ -159,8 +180,9 @@ export class Player {
   applyCharacter(character) {
     this.character = character;
     if (this.isAlive) {
-      this.mesh.material.color.setHex(this.getFactionColor());
+      this.setBodyColorHex(this.getFactionColor());
     }
+    this.applyCosmetic(character && character.equippedCosmetic);
     this.updateHealthBar();
   }
 
@@ -173,7 +195,7 @@ export class Player {
     this.health = health;
     this.isAlive = isAlive;
     this.updateHealthBar();
-    this.mesh.material.color.setHex(isAlive ? this.getFactionColor() : DEAD_COLOR);
+    this.setBodyColorHex(isAlive ? this.getFactionColor() : DEAD_COLOR);
   }
 
   // Nudges the player away from wherever they just got hit from; decays
@@ -241,11 +263,32 @@ export class Player {
       this.isJumping = false;
     }
 
+    // Walk cycle + face the direction of travel
+    const dx = this.mesh.position.x - this._lastAnimPosition.x;
+    const dz = this.mesh.position.z - this._lastAnimPosition.z;
+    const moved = Math.sqrt(dx * dx + dz * dz);
+    animateWalk(this.rig, moved);
+    if (moved > 0.01) {
+      this.mesh.rotation.y = Math.atan2(dx, dz);
+    }
+    this._lastAnimPosition.copy(this.mesh.position);
+
     // Update health bar to face camera
     this.updateHealthBarRotation(camera);
   }
 
   setPosition(position) {
+    // Remote players only move through here -- drive their walk animation
+    // and facing from the position delta.
+    if (!this.isLocal) {
+      const dx = position.x - this.mesh.position.x;
+      const dz = position.z - this.mesh.position.z;
+      const moved = Math.sqrt(dx * dx + dz * dz);
+      animateWalk(this.rig, moved);
+      if (moved > 0.01) {
+        this.mesh.rotation.y = Math.atan2(dx, dz);
+      }
+    }
     this.mesh.position.set(position.x, position.y, position.z);
   }
 
@@ -284,7 +327,7 @@ export class Player {
     this.isJumping = false;
 
     // Back to your faction color, not a hardcoded local=green/remote=red
-    this.mesh.material.color.setHex(this.getFactionColor());
+    this.setBodyColorHex(this.getFactionColor());
 
     // Update health bar
     this.updateHealthBar();

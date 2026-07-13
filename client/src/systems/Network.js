@@ -239,7 +239,7 @@ export class NetworkSystem {
           npc.updateHealthBar();
           console.log(`NPC ${id} health changed from ${oldHealth} to ${health}`);
 
-          npc.mesh.material.color.setHex(isAlive ? npc.getFactionColor() : DEAD_COLOR);
+          npc.setBodyColorHex(isAlive ? npc.getFactionColor() : DEAD_COLOR);
         }
       } else {
         const player = id === this.socket.id ?
@@ -359,6 +359,36 @@ export class NetworkSystem {
         this.gameScene.hud.renderShop(response.character);
       } else {
         this.gameScene.hud.showShopError((response && response.error) || 'Purchase failed');
+      }
+    });
+  }
+
+  buyCosmetic(cosmeticId) {
+    this.socket.emit('buyCosmetic', cosmeticId, (response) => {
+      if (response && response.success) {
+        sound.buy();
+        this.gameScene.character = response.character;
+        this.gameScene.hud.showCharacterInfo(response.character);
+        if (this.gameScene.localPlayer) {
+          this.gameScene.localPlayer.applyCharacter(response.character);
+        }
+        this.gameScene.hud.renderShop(response.character);
+      } else {
+        this.gameScene.hud.showShopError((response && response.error) || 'Purchase failed');
+      }
+    });
+  }
+
+  equipCosmetic(cosmeticId) {
+    this.socket.emit('equipCosmetic', cosmeticId, (response) => {
+      if (response && response.success) {
+        this.gameScene.character = response.character;
+        if (this.gameScene.localPlayer) {
+          this.gameScene.localPlayer.applyCharacter(response.character);
+        }
+        this.gameScene.hud.renderShop(response.character);
+      } else {
+        this.gameScene.hud.showShopError((response && response.error) || 'Equip failed');
       }
     });
   }

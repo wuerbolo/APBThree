@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getFactionColor as resolveFactionColor, DEAD_COLOR } from '../utils/factionColors.js';
+import { buildCharacterMesh, animateWalk } from '../utils/characterModel.js';
 
 export class NPC {
   constructor(id, position, faction = "Civilian") {
@@ -7,25 +8,25 @@ export class NPC {
     this.health = 50;
     this.isAlive = true;
     this.faction = faction; // Store faction information
-    
-    // Create mesh
-    const geometry = new THREE.BoxGeometry(2, 2, 2);
-    
-    // Set color based on faction
-    const material = new THREE.MeshStandardMaterial({
-      color: this.getFactionColor()
-    });
-    
-    this.mesh = new THREE.Mesh(geometry, material);
+
+    // Low-poly humanoid rig, body colored by faction
+    this.rig = buildCharacterMesh(this.getFactionColor());
+    this.mesh = this.rig.group;
+    this.bodyMaterial = this.rig.bodyMaterial;
     this.mesh.position.copy(position);
-    
+
     // Create health bar
     this.createHealthBar();
   }
-  
+
   // Return the color for this NPC's faction
   getFactionColor() {
     return resolveFactionColor(this.faction, false);
+  }
+
+  // Recolor the faction-colored surface (torso + arms).
+  setBodyColorHex(hex) {
+    this.bodyMaterial.color.setHex(hex);
   }
 
   createHealthBar() {
@@ -111,7 +112,7 @@ export class NPC {
     this.updateHealthBar();
 
     if (!this.isAlive) {
-      this.mesh.material.color.setHex(DEAD_COLOR);
+      this.setBodyColorHex(DEAD_COLOR);
     }
 
     return this.isAlive;
@@ -122,24 +123,28 @@ export class NPC {
     if (this.faction !== faction) {
       this.faction = faction;
       if (this.isAlive) {
-        this.mesh.material.color.setHex(this.getFactionColor());
+        this.setBodyColorHex(this.getFactionColor());
       }
       this.updateHealthBar();
     }
   }
 
+  // Server position updates land here (~20Hz); store as a lerp target so
+  // update() smooths the motion each frame and the walk cycle has a real
+  // per-frame delta to animate from.
   setPosition(position) {
-    this.mesh.position.copy(position);
+    if (!this.targetPosition) this.targetPosition = new THREE.Vector3();
+    this.targetPosition.set(position.x, position.y, position.z);
   }
 
   heal(amount) {
     this.health = Math.min(50, this.health + amount);
     this.isAlive = true;
     this.updateHealthBar();
-    
+
     // Update color based on health and faction
-    this.mesh.material.color.setHex(this.getFactionColor());
-    
+    this.setBodyColorHex(this.getFactionColor());
+
     return this.health;
   }
 
@@ -147,9 +152,19 @@ export class NPC {
     if (!this.isAlive) return;
 
     // Smooth movement interpolation is handled here
+    const before = { x: this.mesh.position.x, z: this.mesh.position.z };
     if (this.targetPosition) {
       const lerpFactor = 0.1;
       this.mesh.position.lerp(this.targetPosition, lerpFactor);
+    }
+
+    // Walk cycle + face the direction of travel
+    const dx = this.mesh.position.x - before.x;
+    const dz = this.mesh.position.z - before.z;
+    const moved = Math.sqrt(dx * dx + dz * dz);
+    animateWalk(this.rig, moved);
+    if (moved > 0.01) {
+      this.mesh.rotation.y = Math.atan2(dx, dz);
     }
 
     // Update health bar to face camera

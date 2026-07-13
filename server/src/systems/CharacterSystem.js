@@ -48,7 +48,9 @@ export class CharacterSystem {
             level: character.level,
             reputation: character.reputation,
             money: character.money,
-            weapons: character.weapons
+            weapons: character.weapons,
+            cosmetics: character.cosmetics,
+            equippedCosmetic: character.equippedCosmetic
           };
         });
         fs.writeFileSync(DATA_FILE, JSON.stringify(out, null, 2));

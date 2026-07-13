@@ -1,4 +1,5 @@
 import { getFactionDisplayName } from '../utils/factionColors.js';
+import { COSMETICS } from '../utils/characterModel.js';
 
 export class HUD {
     constructor(gameScene) {
@@ -628,10 +629,35 @@ export class HUD {
 
         const money = character ? character.money : 0;
         const ownsShotgun = !!(character && Array.isArray(character.weapons) && character.weapons.includes('shotgun'));
+        const cosmetics = (character && character.cosmetics) || [];
+        const equipped = character ? character.equippedCosmetic : null;
+
+        const buyButtonStyle = 'padding: 6px 14px; background: #ff9800; color: #111; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;';
+        const equipButtonStyle = 'padding: 6px 14px; background: #455a64; color: #fff; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;';
+
+        const cosmeticRow = (id, item) => {
+            const owned = cosmetics.includes(id);
+            const isEquipped = equipped === id;
+            let action;
+            if (!owned) {
+                action = `<button data-buy-cosmetic="${id}" style="${buyButtonStyle}">Buy $${item.price}</button>`;
+            } else if (isEquipped) {
+                action = `<button data-equip-cosmetic="none" style="${equipButtonStyle}">Unequip</button>`;
+            } else {
+                action = `<button data-equip-cosmetic="${id}" style="${equipButtonStyle}">Equip</button>`;
+            }
+            return `
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 8px 10px; background: rgba(255,255,255,0.06); border-radius: 5px; margin-top: 6px;">
+                    <div style="font-weight: bold;">${item.name}${isEquipped ? ' <span style="color:#81c784; font-size:11px;">(worn)</span>' : ''}</div>
+                    ${action}
+                </div>
+            `;
+        };
 
         overlay.innerHTML = `
             <div style="font-size: 22px; font-weight: bold; color: #ff9800; margin-bottom: 4px;">STORE</div>
             <div style="opacity: 0.7; margin-bottom: 14px;">Your money: $<span id="shop-money">${money}</span></div>
+            <div style="font-size: 13px; font-weight: bold; opacity: 0.7; margin-bottom: 4px;">WEAPONS</div>
             <div style="display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 10px; background: rgba(255,255,255,0.06); border-radius: 5px;">
                 <div>
                     <div style="font-weight: bold;">Shotgun</div>
@@ -639,8 +665,10 @@ export class HUD {
                 </div>
                 ${ownsShotgun
                     ? '<span style="color: #81c784; font-weight: bold;">OWNED</span>'
-                    : '<button id="shop-buy-shotgun" style="padding: 8px 16px; background: #ff9800; color: #111; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Buy $50</button>'}
+                    : `<button id="shop-buy-shotgun" style="${buyButtonStyle}">Buy $50</button>`}
             </div>
+            <div style="font-size: 13px; font-weight: bold; opacity: 0.7; margin: 12px 0 0;">COSMETICS</div>
+            ${Object.entries(COSMETICS).map(([id, item]) => cosmeticRow(id, item)).join('')}
             <div id="shop-error" style="color: #ff5252; font-size: 13px; min-height: 18px; margin-top: 8px;"></div>
             <div style="opacity: 0.5; font-size: 12px; margin-top: 6px;">Press E to close</div>
         `;
@@ -649,7 +677,15 @@ export class HUD {
         if (buyButton) {
             buyButton.onclick = () => this.gameScene.network.buyWeapon('shotgun');
         }
+        overlay.querySelectorAll('[data-buy-cosmetic]').forEach(btn => {
+            btn.onclick = () => this.gameScene.network.buyCosmetic(btn.dataset.buyCosmetic);
+        });
+        overlay.querySelectorAll('[data-equip-cosmetic]').forEach(btn => {
+            const id = btn.dataset.equipCosmetic;
+            btn.onclick = () => this.gameScene.network.equipCosmetic(id === 'none' ? null : id);
+        });
     }
+
 
     showShopError(message) {
         const errorEl = document.getElementById('shop-error');
