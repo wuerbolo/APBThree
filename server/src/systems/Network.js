@@ -3,6 +3,8 @@ import { PlayerModel } from '../models/PlayerModel.js';
 import { NPCSpawner } from './NPCSpawner.js';
 import { CharacterSystem } from './CharacterSystem.js';
 import { MissionSystem } from './MissionSystem.js';
+import { RoundSystem } from './RoundSystem.js';
+import { ScoreSystem } from './ScoreSystem.js';
 import { RateLimiter } from '../utils/RateLimiter.js';
 import { getSpawnPositionForFaction, BUILDINGS } from '../utils/collision.js';
 import * as THREE from 'three';
@@ -48,6 +50,11 @@ export class NetworkSystem {
     // Faction missions (multi-stage jobs with rewards)
     this.missionSystem = new MissionSystem(this);
 
+    // Day/week/year reputation scoreboards + 3-minute faction rounds
+    this.scoreSystem = new ScoreSystem();
+    this.roundSystem = new RoundSystem(this);
+    this.roundSystem.start();
+
     this.setupSocketHandlers();
     
     // Initialize NPC spawner
@@ -67,7 +74,29 @@ export class NetworkSystem {
       }
     });
     entries.sort((a, b) => b.reputation - a.reputation);
-    this.io.emit('leaderboard', entries.slice(0, 5));
+    this.io.emit('leaderboard', {
+      now: entries.slice(0, 5),
+      day: this.scoreSystem.topN('day'),
+      week: this.scoreSystem.topN('week'),
+      year: this.scoreSystem.topN('year')
+    });
+  }
+
+  // Single choke point for reputation changes (kills here, missions via
+  // MissionSystem). Only positive deltas feed the round bars and the
+  // period scoreboards; the death-halving penalty stays out of both.
+  awardReputation(socketId, amount) {
+    const player = this.players.get(socketId);
+    if (!player || !player.hasCharacter()) return;
+    const character = player.getCharacter();
+    character.reputation = Math.max(0, character.reputation + amount);
+    character.updateLevel();
+    this.characterSystem.save();
+    this.io.to(socketId).emit('characterUpdated', character.getData());
+    if (amount > 0) {
+      this.roundSystem.onRepGained(character.faction, amount);
+      this.scoreSystem.record(player.characterKey, character.name, character.faction, amount);
+    }
   }
 
   setupSocketHandlers() {
@@ -121,7 +150,8 @@ export class NetworkSystem {
             amount: pickup.amount
           })),
           character: existingCharacter.getData(),
-          hasCharacter: true
+          hasCharacter: true,
+          round: this.roundSystem.getClientState()
         });
       } else {
         // Player doesn't have a character, tell client to show creation UI
@@ -144,7 +174,8 @@ export class NetworkSystem {
             position: pickup.position,
             amount: pickup.amount
           })),
-          hasCharacter: false
+          hasCharacter: false,
+          round: this.roundSystem.getClientState()
         });
       }
 
@@ -282,8 +313,6 @@ export class NetworkSystem {
 
               const playerWhoKilled = attacker;
               if (playerWhoKilled.hasCharacter()) {
-                const character = playerWhoKilled.getCharacter();
-
                 // Every NPC kill drops cash on the ground instead of
                 // paying out instantly.
                 this.spawnMoneyPickup(npc.position, 10);
@@ -291,10 +320,7 @@ export class NetworkSystem {
                 // Reputation only for putting down a rival-faction NPC --
                 // Civilians are neutral and don't count.
                 if (npcFaction !== "Civilian" && npcFaction !== attackerFaction) {
-                  character.reputation += 10;
-                  character.updateLevel();
-                  this.characterSystem.save();
-                  socket.emit('characterUpdated', character.getData());
+                  this.awardReputation(socket.id, 10);
                 }
 
                 // Mission progress (kill objectives)
@@ -343,23 +369,11 @@ export class NetworkSystem {
               
               // Award XP or reputation to the killer if both have characters
               if (attacker.hasCharacter() && targetPlayer.hasCharacter()) {
-                const killerChar = attacker.getCharacter();
-                const victimChar = targetPlayer.getCharacter();
-                
-                // PvP reputation changes depend on faction relation
-                if (killerChar.faction !== victimChar.faction) {
-                  // Opposing faction kill - gain reputation
-                  killerChar.reputation += 5;
-                } else {
-                  // Same faction kill (shouldn't happen with friendly fire disabled)
-                  // but keep this as a fallback
-                  killerChar.reputation -= 10;
-                }
-                killerChar.updateLevel();
-                this.characterSystem.save();
-
-                // Notify killer of updated character stats
-                socket.emit('characterUpdated', killerChar.getData());
+                // Opposing-faction kill gains reputation; same-faction kill
+                // (shouldn't happen with friendly fire disabled) is a
+                // penalized fallback.
+                const sameFaction = attacker.getCharacter().faction === targetPlayer.getCharacter().faction;
+                this.awardReputation(socket.id, sameFaction ? -10 : 5);
               }
 
               this.applyDeathPenalty(targetId, targetPlayer);

@@ -44,7 +44,7 @@ export class NetworkSystem {
   }
 
   setupSocketHandlers() {
-    this.socket.on('init', ({ id, position, players, npcs, pickups, character, hasCharacter }) => {
+    this.socket.on('init', ({ id, position, players, npcs, pickups, character, hasCharacter, round }) => {
       console.log('Connected with ID:', id);
       
       // Check if player has a character
@@ -87,6 +87,9 @@ export class NetworkSystem {
       (pickups || []).forEach(({ id, position }) => {
         this.gameScene.addMoneyPickup(id, position);
       });
+
+      // Current round snapshot for late joiners
+      if (round) this.gameScene.hud.updateRoundHUD(round);
     });
 
     this.socket.on('spawnMoneyPickup', ({ id, position }) => {
@@ -169,8 +172,31 @@ export class NetworkSystem {
       pellets.forEach(p => this.gameScene.handleRemoteShot(p.id, p.position, p.direction));
     });
 
-    this.socket.on('leaderboard', (entries) => {
-      this.gameScene.hud.updateLeaderboard(entries);
+    this.socket.on('leaderboard', (rankings) => {
+      this.gameScene.hud.updateLeaderboard(rankings);
+    });
+
+    // Faction rounds
+    this.socket.on('roundState', (state) => {
+      this.gameScene.hud.updateRoundHUD(state);
+    });
+
+    this.socket.on('roundProgress', ({ scores }) => {
+      this.gameScene.hud.updateRoundBars(scores);
+    });
+
+    this.socket.on('roundWarning', ({ faction }) => {
+      const color = faction === 'Criminal' ? '#ff5252' : '#64b5f6';
+      this.gameScene.hud.showRoundBanner(`⚠ ¡Los ${faction} están a punto de ganar la ronda!`, color);
+    });
+
+    this.socket.on('roundEnded', ({ winner, bonus }) => {
+      if (winner) {
+        const color = winner === 'Criminal' ? '#ff5252' : '#64b5f6';
+        this.gameScene.hud.showRoundBanner(`🏆 ¡Los ${winner} ganan la ronda! (+$${bonus} para su facción)`, color);
+      } else {
+        this.gameScene.hud.showRoundBanner('Ronda terminada en empate', '#e0e0e0');
+      }
     });
 
     // Missions

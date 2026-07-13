@@ -168,17 +168,16 @@ export class MissionSystem {
     const player = this.networkSystem.players.get(socketId);
     if (player && player.hasCharacter()) {
       const character = player.getCharacter();
+      // Money first so the characterUpdated emitted inside awardReputation
+      // carries both rewards in one message.
       character.money += mission.template.rewardMoney;
-      character.reputation += mission.template.rewardRep;
-      character.updateLevel();
-      this.networkSystem.characterSystem.save();
+      this.networkSystem.awardReputation(socketId, mission.template.rewardRep);
 
       this.networkSystem.io.to(socketId).emit('missionCompleted', {
         title: mission.template.title,
         rewardMoney: mission.template.rewardMoney,
         rewardRep: mission.template.rewardRep
       });
-      this.networkSystem.io.to(socketId).emit('characterUpdated', character.getData());
       console.log(`Mission completed by ${socketId}: ${mission.template.title}`);
     }
 

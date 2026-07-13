@@ -314,7 +314,15 @@ export class HUD {
 
     // --- Leaderboard -------------------------------------------------------
 
-    updateLeaderboard(entries) {
+    // rankings: { now, day, week, year } -- 'now' entries carry .reputation,
+    // the period tabs carry .score (rep earned within the period).
+    updateLeaderboard(rankings) {
+        this._rankings = rankings;
+        this._leaderboardTab = this._leaderboardTab || 'now';
+        this.renderLeaderboard();
+    }
+
+    renderLeaderboard() {
         let panel = document.getElementById('leaderboard');
         if (!panel) {
             panel = document.createElement('div');
@@ -330,7 +338,7 @@ export class HUD {
                 font-family: Arial, sans-serif;
                 font-size: 13px;
                 z-index: 100;
-                min-width: 170px;
+                min-width: 190px;
             `;
             document.body.appendChild(panel);
         }
@@ -338,13 +346,144 @@ export class HUD {
         const factionColor = (faction) =>
             faction === 'Criminal' ? '#ff5252' : faction === 'Enforcer' ? '#64b5f6' : '#81c784';
 
+        const TABS = [
+            ['now', 'Ahora'], ['day', 'Hoy'], ['week', 'Semana'], ['year', 'Año']
+        ];
+        const active = this._leaderboardTab;
+        const entries = (this._rankings && this._rankings[active]) || [];
+
         const rows = entries.length
             ? entries.map((e, i) =>
-                `<div><span style="opacity:0.6">${i + 1}.</span> <span style="color:${factionColor(e.faction)}">${e.name}</span> — ${e.reputation} rep</div>`
+                `<div><span style="opacity:0.6">${i + 1}.</span> <span style="color:${factionColor(e.faction)}">${e.name}</span> — ${active === 'now' ? e.reputation : e.score} rep</div>`
               ).join('')
-            : '<div style="opacity:0.6">Nobody online</div>';
+            : `<div style="opacity:0.6">${active === 'now' ? 'Nobody online' : 'Sin datos aún'}</div>`;
 
-        panel.innerHTML = `<div style="font-weight:bold; margin-bottom:4px;">Fame / Infamy</div>${rows}`;
+        panel.innerHTML = `<div style="font-weight:bold; margin-bottom:4px;">Fame / Infamy</div><div id="leaderboard-tabs" style="display:flex; gap:8px; margin-bottom:6px;"></div>${rows}`;
+
+        const tabRow = panel.querySelector('#leaderboard-tabs');
+        for (const [key, label] of TABS) {
+            const tab = document.createElement('span');
+            tab.textContent = label;
+            tab.style.cssText = `
+                cursor: pointer;
+                padding-bottom: 2px;
+                font-size: 12px;
+                opacity: ${key === active ? '1' : '0.55'};
+                border-bottom: 2px solid ${key === active ? '#ffb74d' : 'transparent'};
+            `;
+            tab.onclick = () => {
+                this._leaderboardTab = key;
+                this.renderLeaderboard();
+            };
+            tabRow.appendChild(tab);
+        }
+    }
+
+    // --- Faction rounds ------------------------------------------------------
+
+    ensureRoundPanel() {
+        let panel = document.getElementById('round-panel');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'round-panel';
+            panel.style.cssText = `
+                position: fixed;
+                bottom: 20px;
+                right: 10px;
+                background-color: rgba(0, 0, 0, 0.7);
+                color: white;
+                padding: 10px;
+                border-radius: 5px;
+                font-family: Arial, sans-serif;
+                font-size: 13px;
+                z-index: 100;
+                min-width: 200px;
+            `;
+            const bar = (faction, color) => `
+                <div style="display:flex; align-items:center; gap:6px; margin-top:5px;">
+                    <span style="color:${color}; width:62px; font-size:12px;">${faction}</span>
+                    <div style="flex:1; height:10px; background:rgba(255,255,255,0.15); border-radius:3px; overflow:hidden;">
+                        <div id="round-bar-${faction}" style="width:0%; height:100%; background:${color}; transition:width 0.3s;"></div>
+                    </div>
+                </div>
+            `;
+            panel.innerHTML = `
+                <div style="display:flex; justify-content:space-between; font-weight:bold;">
+                    <span>Ronda</span><span id="round-timer">--:--</span>
+                </div>
+                ${bar('Criminal', '#ff5252')}
+                ${bar('Enforcer', '#64b5f6')}
+            `;
+            document.body.appendChild(panel);
+        }
+        return panel;
+    }
+
+    // Full round snapshot: (re)sync the countdown and both bars. Called on
+    // init and at each round start.
+    updateRoundHUD(state) {
+        this.ensureRoundPanel();
+        this._roundGoal = state.goal;
+        this._roundEndsAt = Date.now() + state.remainingMs;
+        this.updateRoundBars(state.scores);
+
+        if (!this._roundTimerInterval) {
+            this._roundTimerInterval = setInterval(() => this.renderRoundTimer(), 1000);
+        }
+        this.renderRoundTimer();
+    }
+
+    renderRoundTimer() {
+        const el = document.getElementById('round-timer');
+        if (!el) return;
+        const remaining = Math.max(0, this._roundEndsAt - Date.now());
+        const m = Math.floor(remaining / 60000);
+        const s = Math.floor((remaining % 60000) / 1000);
+        el.textContent = `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    updateRoundBars(scores) {
+        this.ensureRoundPanel();
+        for (const faction of ['Criminal', 'Enforcer']) {
+            const fill = document.getElementById(`round-bar-${faction}`);
+            if (!fill) continue;
+            const pct = Math.min(100, ((scores[faction] || 0) / (this._roundGoal || 100)) * 100);
+            fill.style.width = `${pct}%`;
+        }
+    }
+
+    // Big centered announcement (90% warning, round result). Auto-hides.
+    showRoundBanner(text, color) {
+        let banner = document.getElementById('round-banner');
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'round-banner';
+            banner.style.cssText = `
+                position: fixed;
+                top: 22%;
+                left: 50%;
+                transform: translateX(-50%);
+                background-color: rgba(0, 0, 0, 0.75);
+                padding: 14px 30px;
+                border-radius: 8px;
+                font-family: Arial, sans-serif;
+                font-size: 28px;
+                font-weight: bold;
+                text-align: center;
+                text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+                pointer-events: none;
+                z-index: 1000;
+                max-width: 80%;
+            `;
+            document.body.appendChild(banner);
+        }
+        banner.textContent = text;
+        banner.style.color = color;
+        clearTimeout(this._roundBannerTimer);
+        this._roundBannerTimer = setTimeout(() => {
+            const b = document.getElementById('round-banner');
+            if (b) b.remove();
+        }, 4000);
     }
 
     // --- Missions ----------------------------------------------------------
