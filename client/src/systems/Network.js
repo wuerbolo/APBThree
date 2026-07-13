@@ -1,5 +1,5 @@
 import { io } from 'socket.io-client';
-import { DEAD_COLOR } from '../utils/factionColors.js';
+import { DEAD_COLOR, getFactionDisplayName } from '../utils/factionColors.js';
 import { sound } from '../utils/sound.js';
 
 // Persistent per-browser identity so the server can hand you back your
@@ -187,15 +187,15 @@ export class NetworkSystem {
 
     this.socket.on('roundWarning', ({ faction }) => {
       const color = faction === 'Criminal' ? '#ff5252' : '#64b5f6';
-      this.gameScene.hud.showRoundBanner(`⚠ ¡Los ${faction} están a punto de ganar la ronda!`, color);
+      this.gameScene.hud.showRoundBanner(`⚠ The ${getFactionDisplayName(faction)}s are about to win the round!`, color);
     });
 
     this.socket.on('roundEnded', ({ winner, bonus }) => {
       if (winner) {
         const color = winner === 'Criminal' ? '#ff5252' : '#64b5f6';
-        this.gameScene.hud.showRoundBanner(`🏆 ¡Los ${winner} ganan la ronda! (+$${bonus} para su facción)`, color);
+        this.gameScene.hud.showRoundBanner(`🏆 The ${getFactionDisplayName(winner)}s win the round! (+$${bonus} for their faction)`, color);
       } else {
-        this.gameScene.hud.showRoundBanner('Ronda terminada en empate', '#e0e0e0');
+        this.gameScene.hud.showRoundBanner('Round ended in a draw', '#e0e0e0');
       }
     });
 

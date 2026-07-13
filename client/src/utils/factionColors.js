@@ -20,3 +20,13 @@ export function getFactionColor(faction, isOwn = false) {
   const entry = FACTION_COLORS[faction] || UNASSIGNED;
   return isOwn ? entry.own : entry.base;
 }
+
+// "Criminal" stays the internal faction key everywhere (data model, save
+// files, faction comparisons) -- this is purely the player-facing label.
+const FACTION_DISPLAY_NAMES = {
+  Criminal: 'Outlaw',
+};
+
+export function getFactionDisplayName(faction) {
+  return FACTION_DISPLAY_NAMES[faction] || faction;
+}

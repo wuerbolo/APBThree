@@ -1,3 +1,5 @@
+import { getFactionDisplayName } from '../utils/factionColors.js';
+
 export class HUD {
     constructor(gameScene) {
         this.gameScene = gameScene;
@@ -161,10 +163,10 @@ export class HUD {
         `;
         
         const criminalButton = this.createFactionButton('Criminal', '#d32f2f', 'Operate outside the law, gain reputation by defeating Enforcers.');
-        const enforcerButton = this.createFactionButton('Enforcer', '#1976d2', 'Uphold the law, gain reputation by defeating Criminals.');
+        const enforcerButton = this.createFactionButton('Enforcer', '#1976d2', `Uphold the law, gain reputation by defeating ${getFactionDisplayName('Criminal')}s.`);
 
         criminalButton.onclick = () => {
-            const name = nameInput.value || `Criminal${Math.floor(Math.random() * 1000)}`;
+            const name = nameInput.value || `${getFactionDisplayName('Criminal')}${Math.floor(Math.random() * 1000)}`;
             this.selectFaction('Criminal', name);
             overlay.remove();
         };
@@ -194,7 +196,7 @@ export class HUD {
         `;
         
         const button = document.createElement('button');
-        button.textContent = `Join ${faction}s`;
+        button.textContent = `Join ${getFactionDisplayName(faction)}s`;
         button.style.cssText = `
             padding: 20px 40px;
             font-size: 20px;
@@ -265,7 +267,7 @@ export class HUD {
             <div style="font-weight: bold; font-size: 16px; margin-bottom: 5px;">
                 <span style="color: ${factionColor};">${character.name}</span>
             </div>
-            <div>Faction: <span style="color: ${factionColor};">${character.faction}</span></div>
+            <div>Faction: <span style="color: ${factionColor};">${getFactionDisplayName(character.faction)}</span></div>
             <div>Health: <span id="stat-health">${this.gameScene.localPlayer ? this.gameScene.localPlayer.health : 100}</span></div>
             <div>Level: ${character.level}</div>
             <div>Reputation: <span id="stat-reputation">${character.reputation}</span> / ${character.reputationForNextLevel}</div>
@@ -347,7 +349,7 @@ export class HUD {
             faction === 'Criminal' ? '#ff5252' : faction === 'Enforcer' ? '#64b5f6' : '#81c784';
 
         const TABS = [
-            ['now', 'Ahora'], ['day', 'Hoy'], ['week', 'Semana'], ['year', 'Año']
+            ['now', 'Now'], ['day', 'Today'], ['week', 'Week'], ['year', 'Year']
         ];
         const active = this._leaderboardTab;
         const entries = (this._rankings && this._rankings[active]) || [];
@@ -356,7 +358,7 @@ export class HUD {
             ? entries.map((e, i) =>
                 `<div><span style="opacity:0.6">${i + 1}.</span> <span style="color:${factionColor(e.faction)}">${e.name}</span> — ${active === 'now' ? e.reputation : e.score} rep</div>`
               ).join('')
-            : `<div style="opacity:0.6">${active === 'now' ? 'Nobody online' : 'Sin datos aún'}</div>`;
+            : `<div style="opacity:0.6">${active === 'now' ? 'Nobody online' : 'No data yet'}</div>`;
 
         panel.innerHTML = `<div style="font-weight:bold; margin-bottom:4px;">Fame / Infamy</div><div id="leaderboard-tabs" style="display:flex; gap:8px; margin-bottom:6px;"></div>${rows}`;
 
@@ -401,7 +403,7 @@ export class HUD {
             `;
             const bar = (faction, color) => `
                 <div style="display:flex; align-items:center; gap:6px; margin-top:5px;">
-                    <span style="color:${color}; width:62px; font-size:12px;">${faction}</span>
+                    <span style="color:${color}; width:62px; font-size:12px;">${getFactionDisplayName(faction)}</span>
                     <div style="flex:1; height:10px; background:rgba(255,255,255,0.15); border-radius:3px; overflow:hidden;">
                         <div id="round-bar-${faction}" style="width:0%; height:100%; background:${color}; transition:width 0.3s;"></div>
                     </div>
@@ -409,7 +411,7 @@ export class HUD {
             `;
             panel.innerHTML = `
                 <div style="display:flex; justify-content:space-between; font-weight:bold;">
-                    <span>Ronda</span><span id="round-timer">--:--</span>
+                    <span>Round</span><span id="round-timer">--:--</span>
                 </div>
                 ${bar('Criminal', '#ff5252')}
                 ${bar('Enforcer', '#64b5f6')}

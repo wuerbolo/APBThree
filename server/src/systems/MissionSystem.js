@@ -64,7 +64,7 @@ const TEMPLATES = {
     {
       id: 'crackdown',
       title: 'Crackdown',
-      description: 'Criminal activity is spiking. Put down their muscle.',
+      description: 'Outlaw activity is spiking. Put down their muscle.',
       rewardMoney: 40,
       rewardRep: 30,
       buildStages: () => [
