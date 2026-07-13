@@ -5,6 +5,7 @@ import { NetworkSystem } from '../systems/Network';
 import { HUD } from '../systems/HUD.js';
 import { BUILDINGS, PLAZA, WORLD_SIZE, WORLD_HALF } from '../utils/collision.js';
 import { sound } from '../utils/sound.js';
+import { DEAD_COLOR } from '../utils/factionColors.js';
 
 // Client-side weapon behavior; prices/ownership are validated server-side.
 const WEAPONS = {
@@ -720,12 +721,17 @@ export class GameScene {
             });
           }
 
-          // Visual feedback
-          const originalColor = player.mesh.material.color.clone();
+          // Visual feedback -- revert to the *computed* faction color rather
+          // than whatever's on the material right now. With a multi-pellet
+          // weapon several pellets can hit the same target in one frame;
+          // capturing "current color" as the original would just capture
+          // the flash color a sibling pellet had already applied, and the
+          // target would get stuck flashed. A single timer per target also
+          // avoids a pile of pending reverts firing out of order.
+          clearTimeout(player._hitFlashTimer);
           player.mesh.material.color.setHex(0xffff00);
-          
-          setTimeout(() => {
-            player.mesh.material.color.copy(originalColor);
+          player._hitFlashTimer = setTimeout(() => {
+            player.mesh.material.color.setHex(player.isAlive ? player.getFactionColor() : DEAD_COLOR);
           }, 100);
 
           // Remove projectile
@@ -745,12 +751,11 @@ export class GameScene {
             });
           }
 
-          // Visual feedback
-          const originalColor = npc.mesh.material.color.clone();
+          // Visual feedback (see comment on the player branch above)
+          clearTimeout(npc._hitFlashTimer);
           npc.mesh.material.color.setHex(0xff0000);
-          
-          setTimeout(() => {
-            npc.mesh.material.color.copy(originalColor);
+          npc._hitFlashTimer = setTimeout(() => {
+            npc.mesh.material.color.setHex(npc.isAlive ? npc.getFactionColor() : DEAD_COLOR);
           }, 100);
 
           // Remove projectile

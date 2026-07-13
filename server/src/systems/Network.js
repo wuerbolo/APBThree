@@ -286,7 +286,12 @@ export class NetworkSystem {
           // Player attacking NPC
           const npc = this.npcs.get(targetId);
           if (!npc) return; // NPC not found
-          
+          // Already dead -- ignore. Without this, a multi-pellet weapon
+          // (or just several shots landing in the same tick) re-runs the
+          // whole death payout -- cash drop, reputation, mission progress --
+          // once per pellet that still lands on the corpse.
+          if (!npc.isAlive) return;
+
           // Get the NPC's faction
           const npcFaction = npc.faction;
 
