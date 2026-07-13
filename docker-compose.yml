@@ -6,6 +6,7 @@ services:
     restart: unless-stopped
     mem_limit: 512m
     mem_reservation: 256m
+    cpu_shares: 256
     environment:
       PORT: 3000
       CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:5173}
