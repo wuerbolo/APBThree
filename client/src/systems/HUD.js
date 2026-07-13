@@ -273,7 +273,8 @@ export class HUD {
             <div>Level: ${character.level}</div>
             <div>Reputation: <span id="stat-reputation">${character.reputation}</span> / ${character.reputationForNextLevel}</div>
             <div>Money: $<span id="stat-money">${character.money}</span></div>
-            <div>Weapon: <span id="stat-weapon">${this.gameScene.currentWeapon}</span> <span style="opacity:0.6">(1/2 to switch)</span></div>
+            <div>Weapon: <span id="stat-weapon">${this.gameScene.currentWeapon}</span> <span style="opacity:0.6">(1-4 to switch)</span></div>
+            <div>Wanted: <span id="stat-wanted">—</span></div>
         `;
     }
 
@@ -286,6 +287,84 @@ export class HUD {
     updateWeaponStat(weaponId) {
         const weaponEl = document.getElementById('stat-weapon');
         if (weaponEl) weaponEl.textContent = weaponId;
+    }
+
+    updateWantedStars(stars) {
+        const wantedEl = document.getElementById('stat-wanted');
+        if (wantedEl) {
+            wantedEl.textContent = stars > 0 ? '★'.repeat(stars) : '—';
+            wantedEl.style.color = stars > 0 ? '#ffca28' : '';
+        }
+    }
+
+    // Contextual "[F] do thing" prompt above the hotbar area. Pass null to hide.
+    setInteractPrompt(text) {
+        if (this._interactPromptText === text) return;
+        this._interactPromptText = text;
+        let prompt = document.getElementById('interact-prompt');
+        if (!text) {
+            if (prompt) prompt.style.display = 'none';
+            return;
+        }
+        if (!prompt) {
+            prompt = document.createElement('div');
+            prompt.id = 'interact-prompt';
+            prompt.style.cssText = `
+                position: fixed;
+                bottom: 140px;
+                left: 50%;
+                transform: translateX(-50%);
+                background-color: rgba(0, 0, 0, 0.75);
+                color: #aed581;
+                padding: 8px 16px;
+                border-radius: 5px;
+                font-family: Arial, sans-serif;
+                font-size: 15px;
+                z-index: 850;
+                pointer-events: none;
+            `;
+            document.body.appendChild(prompt);
+        }
+        prompt.textContent = text;
+        prompt.style.display = 'block';
+    }
+
+    // Fullscreen "you're in jail" overlay with a live countdown.
+    showJailOverlay(seconds) {
+        this.hideJailOverlay();
+        const overlay = document.createElement('div');
+        overlay.id = 'jail-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 20%;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: #90a4ae;
+            padding: 20px 40px;
+            border-radius: 8px;
+            border: 2px solid #546e7a;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            z-index: 1000;
+        `;
+        const releaseAt = Date.now() + seconds * 1000;
+        const render = () => {
+            const left = Math.max(0, Math.ceil((releaseAt - Date.now()) / 1000));
+            overlay.innerHTML = `
+                <div style="font-size: 28px; font-weight: bold;">🚔 ARRESTED</div>
+                <div style="margin-top: 6px;">Released in <span style="color: #fff; font-weight: bold;">${left}s</span></div>
+            `;
+        };
+        render();
+        this._jailInterval = setInterval(render, 500);
+        document.body.appendChild(overlay);
+    }
+
+    hideJailOverlay() {
+        clearInterval(this._jailInterval);
+        const overlay = document.getElementById('jail-overlay');
+        if (overlay) overlay.remove();
     }
 
     // --- Crosshair ---------------------------------------------------------
@@ -519,8 +598,13 @@ export class HUD {
         return !!this._pendingMissionOffer;
     }
 
+    hasActiveMission() {
+        return !!this._missionActive;
+    }
+
     showMissionOffer(offer) {
         this._pendingMissionOffer = true;
+        this._missionActive = false;
         const panel = this.ensureMissionPanel();
         panel.innerHTML = `
             <div style="font-weight: bold; color: #ffb74d; margin-bottom: 3px;">NEW JOB: ${offer.title}</div>
@@ -532,6 +616,7 @@ export class HUD {
 
     showMissionTracker(update) {
         this._pendingMissionOffer = false;
+        this._missionActive = true;
         const panel = this.ensureMissionPanel();
         panel.innerHTML = `
             <div style="font-weight: bold; color: #ffb74d; margin-bottom: 3px;">${update.title}</div>
@@ -542,6 +627,7 @@ export class HUD {
     // Flash a completion/failure message, then clear the panel.
     showMissionResult(html) {
         this._pendingMissionOffer = false;
+        this._missionActive = false;
         const panel = this.ensureMissionPanel();
         panel.innerHTML = html;
         clearTimeout(this._missionResultTimer);
@@ -628,12 +714,33 @@ export class HUD {
         if (!overlay) return;
 
         const money = character ? character.money : 0;
-        const ownsShotgun = !!(character && Array.isArray(character.weapons) && character.weapons.includes('shotgun'));
+        const ownedWeapons = (character && character.weapons) || [];
         const cosmetics = (character && character.cosmetics) || [];
         const equipped = character ? character.equippedCosmetic : null;
 
         const buyButtonStyle = 'padding: 6px 14px; background: #ff9800; color: #111; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;';
         const equipButtonStyle = 'padding: 6px 14px; background: #455a64; color: #fff; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;';
+
+        const SHOP_WEAPONS = {
+            shotgun: { name: 'Shotgun', desc: '6 pellets, brutal up close', price: 50 },
+            smg: { name: 'SMG', desc: 'Hold click to spray', price: 120 },
+            sniper: { name: 'Sniper', desc: 'Right-click to zoom, huge damage', price: 200 }
+        };
+
+        const weaponRow = (id, item) => {
+            const owned = ownedWeapons.includes(id);
+            return `
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 8px 10px; background: rgba(255,255,255,0.06); border-radius: 5px; margin-top: 6px;">
+                    <div>
+                        <div style="font-weight: bold;">${item.name}</div>
+                        <div style="font-size: 12px; opacity: 0.7;">${item.desc}</div>
+                    </div>
+                    ${owned
+                        ? '<span style="color: #81c784; font-weight: bold;">OWNED</span>'
+                        : `<button data-buy-weapon="${id}" style="${buyButtonStyle}">Buy $${item.price}</button>`}
+                </div>
+            `;
+        };
 
         const cosmeticRow = (id, item) => {
             const owned = cosmetics.includes(id);
@@ -658,25 +765,16 @@ export class HUD {
             <div style="font-size: 22px; font-weight: bold; color: #ff9800; margin-bottom: 4px;">STORE</div>
             <div style="opacity: 0.7; margin-bottom: 14px;">Your money: $<span id="shop-money">${money}</span></div>
             <div style="font-size: 13px; font-weight: bold; opacity: 0.7; margin-bottom: 4px;">WEAPONS</div>
-            <div style="display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 10px; background: rgba(255,255,255,0.06); border-radius: 5px;">
-                <div>
-                    <div style="font-weight: bold;">Shotgun</div>
-                    <div style="font-size: 12px; opacity: 0.7;">6 pellets, brutal up close</div>
-                </div>
-                ${ownsShotgun
-                    ? '<span style="color: #81c784; font-weight: bold;">OWNED</span>'
-                    : `<button id="shop-buy-shotgun" style="${buyButtonStyle}">Buy $50</button>`}
-            </div>
+            ${Object.entries(SHOP_WEAPONS).map(([id, item]) => weaponRow(id, item)).join('')}
             <div style="font-size: 13px; font-weight: bold; opacity: 0.7; margin: 12px 0 0;">COSMETICS</div>
             ${Object.entries(COSMETICS).map(([id, item]) => cosmeticRow(id, item)).join('')}
             <div id="shop-error" style="color: #ff5252; font-size: 13px; min-height: 18px; margin-top: 8px;"></div>
             <div style="opacity: 0.5; font-size: 12px; margin-top: 6px;">Press E to close</div>
         `;
 
-        const buyButton = document.getElementById('shop-buy-shotgun');
-        if (buyButton) {
-            buyButton.onclick = () => this.gameScene.network.buyWeapon('shotgun');
-        }
+        overlay.querySelectorAll('[data-buy-weapon]').forEach(btn => {
+            btn.onclick = () => this.gameScene.network.buyWeapon(btn.dataset.buyWeapon);
+        });
         overlay.querySelectorAll('[data-buy-cosmetic]').forEach(btn => {
             btn.onclick = () => this.gameScene.network.buyCosmetic(btn.dataset.buyCosmetic);
         });

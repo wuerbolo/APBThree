@@ -44,7 +44,7 @@ export class NetworkSystem {
   }
 
   setupSocketHandlers() {
-    this.socket.on('init', ({ id, position, players, npcs, pickups, character, hasCharacter, round }) => {
+    this.socket.on('init', ({ id, position, players, npcs, pickups, medkits, airdrop, character, hasCharacter, round }) => {
       console.log('Connected with ID:', id);
       
       // Check if player has a character
@@ -88,8 +88,78 @@ export class NetworkSystem {
         this.gameScene.addMoneyPickup(id, position);
       });
 
+      // Medkits and any airdrop already in the world
+      (medkits || []).forEach(({ id, position }) => {
+        this.gameScene.addMedkit(id, position);
+      });
+      if (airdrop) this.gameScene.addAirdrop(airdrop);
+
       // Current round snapshot for late joiners
       if (round) this.gameScene.hud.updateRoundHUD(round);
+    });
+
+    this.socket.on('spawnMedkit', ({ id, position }) => {
+      this.gameScene.addMedkit(id, position);
+    });
+
+    this.socket.on('removeMedkit', (id) => {
+      this.gameScene.removeMedkit(id);
+    });
+
+    this.socket.on('airdropSpawned', ({ id, position, amount }) => {
+      sound.airdropAlert();
+      this.gameScene.addAirdrop({ id, position, amount });
+      this.gameScene.hud.showRoundBanner(`📦 Supply drop incoming: $${amount}! First one there keeps it.`, '#ffb300');
+    });
+
+    this.socket.on('airdropClaimed', ({ name, amount }) => {
+      this.gameScene.removeAirdrop();
+      this.gameScene.hud.showRoundBanner(`📦 ${name} claimed the supply drop ($${amount})!`, '#ffb300');
+    });
+
+    this.socket.on('wantedUpdate', ({ id, name, stars }) => {
+      if (id === this.socket.id) {
+        this.gameScene.hud.updateWantedStars(stars);
+      }
+      if (stars >= 3) {
+        this.gameScene.hud.showRoundBanner(`🚨 ${name} is WANTED (${'★'.repeat(stars)}) — bounty $${stars * 30}!`, '#ff5252');
+      }
+    });
+
+    this.socket.on('bountyClaimed', ({ hunter, target, amount }) => {
+      this.gameScene.hud.showRoundBanner(`💰 ${hunter} collected the $${amount} bounty on ${target}!`, '#ffd54a');
+    });
+
+    this.socket.on('entityJailed', ({ isNPC, seconds, by, bounty }) => {
+      const suffix = bounty ? ` (+$${bounty} bounty)` : '';
+      this.gameScene.hud.showRoundBanner(
+        `🚔 ${by} cuffed an Outlaw${isNPC ? ' NPC' : ''} — ${seconds}s in the cage${suffix}`,
+        '#64b5f6'
+      );
+    });
+
+    // You got arrested: snap to the cell and lock input until released
+    this.socket.on('arrested', ({ seconds, position }) => {
+      sound.arrest();
+      this.gameScene.jailedUntil = Date.now() + seconds * 1000;
+      if (this.gameScene.localPlayer) {
+        this.gameScene.localPlayer.setPosition({ x: position.x, y: 1, z: position.z });
+      }
+      this.gameScene.hud.showJailOverlay(seconds);
+    });
+
+    this.socket.on('released', ({ position }) => {
+      this.gameScene.jailedUntil = 0;
+      if (this.gameScene.localPlayer) {
+        this.gameScene.localPlayer.setPosition({ x: position.x, y: 1, z: position.z });
+      }
+      this.gameScene.hud.hideJailOverlay();
+    });
+
+    this.socket.on('emote', ({ id, type }) => {
+      if (type === 'dance') {
+        this.gameScene.dancingUntil.set(id, Date.now() + 2500);
+      }
     });
 
     this.socket.on('spawnMoneyPickup', ({ id, position }) => {
@@ -169,7 +239,7 @@ export class NetworkSystem {
       // New format: { weapon, pellets: [{id, position, direction}] }.
       // Old single-projectile format kept as a fallback.
       const pellets = data.pellets || [{ id: data.id, position: data.position, direction: data.direction }];
-      pellets.forEach(p => this.gameScene.handleRemoteShot(p.id, p.position, p.direction));
+      pellets.forEach(p => this.gameScene.handleRemoteShot(p.id, p.position, p.direction, data.weapon));
     });
 
     this.socket.on('leaderboard', (rankings) => {

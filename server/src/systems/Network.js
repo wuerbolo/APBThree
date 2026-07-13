@@ -6,7 +6,7 @@ import { MissionSystem } from './MissionSystem.js';
 import { RoundSystem } from './RoundSystem.js';
 import { ScoreSystem } from './ScoreSystem.js';
 import { RateLimiter } from '../utils/RateLimiter.js';
-import { getSpawnPositionForFaction, BUILDINGS } from '../utils/collision.js';
+import { getSpawnPositionForFaction, BUILDINGS, JAIL, MISSION_CONTACTS, CONTACT_INTERACT_RADIUS, WORLD_HALF } from '../utils/collision.js';
 import * as THREE from 'three';
 
 function getClientIp(socket) {
@@ -17,7 +17,9 @@ function getClientIp(socket) {
 
 // What the STORE sells. Server-side so the client can't invent prices.
 const WEAPON_CATALOG = {
-  shotgun: { price: 50 }
+  shotgun: { price: 50 },
+  smg: { price: 120 },
+  sniper: { price: 200 }
 };
 const COSMETIC_CATALOG = {
   cap: { price: 30 },
@@ -25,6 +27,36 @@ const COSMETIC_CATALOG = {
   halo: { price: 250 }
 };
 const STORE_BUY_RADIUS = 15;
+
+// Interactions (revive/arrest/talk) require being right next to the target.
+const INTERACT_RADIUS = 4;
+
+const JAIL_SECONDS = 10;
+const ARREST_REWARD_MONEY = 25;
+const ARREST_REWARD_REP = 8;
+const REVIVE_REWARD = 10;
+
+// WANTED system: stars from killing Civilians, decaying over time. At 3+
+// stars you're announced server-wide, NPC Enforcers hunt you from twice
+// the range, and your head is worth stars * WANTED_BOUNTY_PER_STAR to
+// whoever kills or arrests you.
+const MAX_WANTED_STARS = 5;
+const WANTED_DECAY_MS = 45000;
+const WANTED_BOUNTY_PER_STAR = 30;
+
+const MEDKIT_TARGET_COUNT = 4;
+const MEDKIT_HEAL = 30;
+
+const AIRDROP_INTERVAL_MS = 120000;
+const AIRDROP_CLAIM_RADIUS = 2.5;
+
+function randomOpenPosition() {
+  return {
+    x: Math.random() * (WORLD_HALF * 2 - 20) - (WORLD_HALF - 10),
+    y: 1,
+    z: Math.random() * (WORLD_HALF * 2 - 20) - (WORLD_HALF - 10)
+  };
+}
 
 export class NetworkSystem {
   constructor(server) {
@@ -38,16 +70,23 @@ export class NetworkSystem {
     this.players = new Map();
     this.npcs = new Map();
     this.moneyPickups = new Map();
+    this.medkits = new Map();
     this.nextPickupSequence = 0;
+
+    // Airdrop event state ({ id, position, amount } while one is up)
+    this.airdrop = null;
 
     // Per-socket sliding-window limits on the noisiest events. A normal
     // player's input loop stays well under these; a script hammering the
     // server won't.
     this.positionLimiter = new RateLimiter(60, 1000);
-    this.shootLimiter = new RateLimiter(10, 1000);
+    // The SMG auto-fires at ~11 shots/s, so the old 10/s tripped on
+    // legitimate play.
+    this.shootLimiter = new RateLimiter(20, 1000);
     // High enough for a shotgun blast (6 pellets, each its own damage
     // event) landing twice in the same second.
     this.damageLimiter = new RateLimiter(40, 1000);
+    this.interactLimiter = new RateLimiter(5, 1000);
 
     // Initialize character system
     this.characterSystem = new CharacterSystem();
@@ -68,6 +107,104 @@ export class NetworkSystem {
 
     // Fame/Infamy leaderboard for everyone currently online
     setInterval(() => this.broadcastLeaderboard(), 5000);
+
+    // Keep MEDKIT_TARGET_COUNT medkits on the map
+    this.maintainMedkits();
+    setInterval(() => this.maintainMedkits(), 5000);
+
+    // Periodic cash airdrop everyone races to claim
+    setInterval(() => this.spawnAirdrop(), AIRDROP_INTERVAL_MS);
+    setTimeout(() => this.spawnAirdrop(), 45000);
+
+    // WANTED stars cool off over time
+    setInterval(() => this.decayWanted(), 15000);
+  }
+
+  // --- Medkits --------------------------------------------------------------
+
+  maintainMedkits() {
+    while (this.medkits.size < MEDKIT_TARGET_COUNT) {
+      const id = `medkit-${Date.now()}-${this.nextPickupSequence++}`;
+      const position = randomOpenPosition();
+      this.medkits.set(id, { position });
+      this.io.emit('spawnMedkit', { id, position });
+    }
+  }
+
+  // --- Airdrops ---------------------------------------------------------------
+
+  spawnAirdrop() {
+    if (this.airdrop) return; // previous one still unclaimed
+    const id = `drop-${Date.now()}`;
+    const amount = 100 + Math.floor(Math.random() * 150);
+    const position = randomOpenPosition();
+    this.airdrop = { id, position, amount };
+    this.io.emit('airdropSpawned', { id, position, amount });
+    console.log(`Airdrop ${id} ($${amount}) at`, position);
+  }
+
+  tryClaimAirdrop(socketId, player) {
+    if (!this.airdrop || !player.isAlive || !player.hasCharacter()) return;
+    const dx = player.position.x - this.airdrop.position.x;
+    const dz = player.position.z - this.airdrop.position.z;
+    if (Math.sqrt(dx * dx + dz * dz) > AIRDROP_CLAIM_RADIUS) return;
+
+    const character = player.getCharacter();
+    character.money += this.airdrop.amount;
+    this.characterSystem.save();
+    this.io.emit('airdropClaimed', { name: character.name, amount: this.airdrop.amount });
+    this.io.to(socketId).emit('characterUpdated', character.getData());
+    console.log(`Airdrop claimed by ${character.name} ($${this.airdrop.amount})`);
+    this.airdrop = null;
+  }
+
+  // --- WANTED -----------------------------------------------------------------
+
+  addWanted(socketId) {
+    const player = this.players.get(socketId);
+    if (!player || !player.hasCharacter()) return;
+    player.wantedStars = Math.min(MAX_WANTED_STARS, player.wantedStars + 1);
+    player.lastWantedAt = Date.now();
+    this.broadcastWanted(socketId, player);
+  }
+
+  clearWanted(socketId) {
+    const player = this.players.get(socketId);
+    if (!player || player.wantedStars === 0) return;
+    player.wantedStars = 0;
+    this.broadcastWanted(socketId, player);
+  }
+
+  decayWanted() {
+    const now = Date.now();
+    this.players.forEach((player, socketId) => {
+      if (player.wantedStars > 0 && now - player.lastWantedAt > WANTED_DECAY_MS) {
+        player.wantedStars--;
+        player.lastWantedAt = now;
+        this.broadcastWanted(socketId, player);
+      }
+    });
+  }
+
+  broadcastWanted(socketId, player) {
+    this.io.emit('wantedUpdate', {
+      id: socketId,
+      name: player.hasCharacter() ? player.getCharacter().name : '???',
+      stars: player.wantedStars
+    });
+  }
+
+  // Cash bounty for taking down (or arresting) a wanted player.
+  collectBounty(hunterSocketId, wantedPlayer) {
+    const bounty = wantedPlayer.wantedStars * WANTED_BOUNTY_PER_STAR;
+    if (bounty <= 0) return 0;
+    const hunter = this.players.get(hunterSocketId);
+    if (!hunter || !hunter.hasCharacter()) return 0;
+    const character = hunter.getCharacter();
+    character.money += bounty;
+    this.characterSystem.save();
+    this.io.to(hunterSocketId).emit('characterUpdated', character.getData());
+    return bounty;
   }
 
   broadcastLeaderboard() {
@@ -154,6 +291,11 @@ export class NetworkSystem {
             position: pickup.position,
             amount: pickup.amount
           })),
+          medkits: Array.from(this.medkits.entries()).map(([id, kit]) => ({
+            id,
+            position: kit.position
+          })),
+          airdrop: this.airdrop,
           character: existingCharacter.getData(),
           hasCharacter: true,
           round: this.roundSystem.getClientState()
@@ -179,6 +321,11 @@ export class NetworkSystem {
             position: pickup.position,
             amount: pickup.amount
           })),
+          medkits: Array.from(this.medkits.entries()).map(([id, kit]) => ({
+            id,
+            position: kit.position
+          })),
+          airdrop: this.airdrop,
           hasCharacter: false,
           round: this.roundSystem.getClientState()
         });
@@ -191,15 +338,160 @@ export class NetworkSystem {
         character: player.hasCharacter() ? player.getCharacter().getData() : null
       });
 
-      // Returning players with a character get a mission offer shortly
-      // after connecting
-      if (existingCharacter) {
-        this.missionSystem.scheduleOffer(socket.id, 3000);
-      }
-
       // Handle mission acceptance
       socket.on('missionAccept', () => {
         this.missionSystem.accept(socket.id);
+      });
+
+      // Talk to your faction's contact NPC to get a job offer
+      socket.on('requestMission', () => {
+        if (!this.interactLimiter.allow(socket.id)) return;
+        const player = this.players.get(socket.id);
+        if (!player || !player.hasCharacter() || !player.isAlive) return;
+
+        const contact = MISSION_CONTACTS[player.getCharacter().faction];
+        if (!contact) return;
+        const dx = player.position.x - contact.x;
+        const dz = player.position.z - contact.z;
+        if (Math.sqrt(dx * dx + dz * dz) > CONTACT_INTERACT_RADIUS) return;
+
+        // Re-send the pending offer if they walked away and came back,
+        // otherwise roll a fresh one.
+        const existing = this.missionSystem.missions.get(socket.id);
+        if (existing && existing.state === 'offered') {
+          const t = existing.template;
+          socket.emit('missionOffer', {
+            title: t.title, description: t.description,
+            rewardMoney: t.rewardMoney, rewardRep: t.rewardRep
+          });
+          return;
+        }
+        this.missionSystem.offer(socket.id);
+      });
+
+      // Enforcer revives a downed Civilian NPC for cash
+      socket.on('reviveCivilian', (targetId) => {
+        if (!this.interactLimiter.allow(socket.id)) return;
+        const player = this.players.get(socket.id);
+        if (!player || !player.isAlive || !player.hasCharacter()) return;
+        if (player.getCharacter().faction !== 'Enforcer') return;
+
+        const npc = this.npcs.get(targetId);
+        if (!npc || npc.isAlive || npc.faction !== 'Civilian') return;
+
+        const dx = player.position.x - npc.position.x;
+        const dz = player.position.z - npc.position.z;
+        if (Math.sqrt(dx * dx + dz * dz) > INTERACT_RADIUS) return;
+
+        npc.heal(50); // full heal; also cancels the corpse despawn timer
+        this.io.emit('updateHealth', {
+          id: targetId,
+          health: npc.health,
+          isAlive: true,
+          isNPC: true,
+          faction: npc.faction
+        });
+
+        const character = player.getCharacter();
+        character.money += REVIVE_REWARD;
+        this.characterSystem.save();
+        socket.emit('characterUpdated', character.getData());
+        console.log(`${character.name} revived Civilian ${targetId} (+$${REVIVE_REWARD})`);
+      });
+
+      // Enforcer handcuffs an Outlaw (player or NPC): straight to the
+      // holding cell for JAIL_SECONDS, then released.
+      socket.on('arrest', ({ targetId, isNPC }) => {
+        if (!this.interactLimiter.allow(socket.id)) return;
+        const player = this.players.get(socket.id);
+        if (!player || !player.isAlive || !player.hasCharacter()) return;
+        if (player.getCharacter().faction !== 'Enforcer') return;
+
+        const now = Date.now();
+        const jailPosition = { x: JAIL.x, y: 1, z: JAIL.z };
+
+        if (isNPC) {
+          const npc = this.npcs.get(targetId);
+          if (!npc || !npc.isAlive || npc.faction !== 'Criminal') return;
+          if (now < npc.jailedUntil) return;
+
+          const dx = player.position.x - npc.position.x;
+          const dz = player.position.z - npc.position.z;
+          if (Math.sqrt(dx * dx + dz * dz) > INTERACT_RADIUS) return;
+
+          npc.jailedUntil = now + JAIL_SECONDS * 1000;
+          npc.position = { ...jailPosition };
+          npc.targetPosition = null; // pick a fresh target on release
+          this.io.emit('npcMoved', { id: targetId, position: npc.position });
+          this.io.emit('entityJailed', { id: targetId, isNPC: true, seconds: JAIL_SECONDS, by: player.getCharacter().name });
+        } else {
+          const target = this.players.get(targetId);
+          if (!target || !target.isAlive || target.isJailed()) return;
+          if (!target.hasCharacter() || target.getCharacter().faction !== 'Criminal') return;
+
+          const dx = player.position.x - target.position.x;
+          const dz = player.position.z - target.position.z;
+          if (Math.sqrt(dx * dx + dz * dz) > INTERACT_RADIUS) return;
+
+          const bounty = this.collectBounty(socket.id, target);
+          this.clearWanted(targetId);
+          this.missionSystem.fail(targetId, 'You got arrested mid-job.');
+
+          target.jailedUntil = now + JAIL_SECONDS * 1000;
+          target.updatePosition({ ...jailPosition });
+          this.io.to(targetId).emit('arrested', { seconds: JAIL_SECONDS, position: jailPosition });
+          this.io.emit('playerMoved', { id: targetId, position: jailPosition });
+          this.io.emit('entityJailed', { id: targetId, isNPC: false, seconds: JAIL_SECONDS, by: player.getCharacter().name, bounty });
+
+          // Release: fresh spawn somewhere on the map
+          setTimeout(() => {
+            const releasedPlayer = this.players.get(targetId);
+            if (!releasedPlayer) return; // disconnected while jailed
+            const releasePosition = getSpawnPositionForFaction('Criminal');
+            releasedPlayer.jailedUntil = 0;
+            releasedPlayer.updatePosition(releasePosition);
+            this.io.to(targetId).emit('released', { position: releasePosition });
+            this.io.emit('playerMoved', { id: targetId, position: releasePosition });
+          }, JAIL_SECONDS * 1000);
+        }
+
+        // Arrest pay: flat reward + rep (bounty for wanted players handled above)
+        const character = player.getCharacter();
+        character.money += ARREST_REWARD_MONEY;
+        this.characterSystem.save();
+        this.awardReputation(socket.id, ARREST_REWARD_REP);
+      });
+
+      // Walk over a medkit to heal
+      socket.on('collectMedkit', (medkitId) => {
+        const medkit = this.medkits.get(medkitId);
+        if (!medkit) return;
+
+        const player = this.players.get(socket.id);
+        if (!player || !player.isAlive) return;
+
+        const dx = player.position.x - medkit.position.x;
+        const dz = player.position.z - medkit.position.z;
+        if (Math.sqrt(dx * dx + dz * dz) > 5) return;
+        if (player.health >= 100) return; // don't waste it at full health
+
+        this.medkits.delete(medkitId);
+        this.io.emit('removeMedkit', medkitId);
+
+        player.heal(MEDKIT_HEAL);
+        this.io.emit('updateHealth', {
+          id: socket.id,
+          health: player.health,
+          isAlive: true,
+          isNPC: false
+        });
+      });
+
+      // Dance emote -- pure flair, relayed to everyone
+      socket.on('emote', (type) => {
+        if (!this.interactLimiter.allow(socket.id)) return;
+        if (type !== 'dance') return;
+        this.io.emit('emote', { id: socket.id, type });
       });
 
       // Handle character creation
@@ -214,7 +506,6 @@ export class NetworkSystem {
         // Create character
         const character = this.characterSystem.createCharacter(playerKey, name, faction);
         player.setCharacter(character);
-        this.missionSystem.scheduleOffer(socket.id, 3000);
 
         // Place them at their faction's spawn -- HQ for Enforcers, anywhere
         // on the map for Criminals.
@@ -244,8 +535,12 @@ export class NetworkSystem {
         }
         const player = this.players.get(socket.id);
         if (player) {
+          // Jailed players are pinned in the cell -- ignore their client's
+          // position updates until release.
+          if (player.isJailed()) return;
           player.updatePosition(position);
           this.missionSystem.onPosition(socket.id, position);
+          this.tryClaimAirdrop(socket.id, player);
           socket.broadcast.emit('playerMoved', {
             id: socket.id,
             position
@@ -296,6 +591,8 @@ export class NetworkSystem {
           // whole death payout -- cash drop, reputation, mission progress --
           // once per pellet that still lands on the corpse.
           if (!npc.isAlive) return;
+          // Jailed NPCs are behind bars -- untouchable until release
+          if (Date.now() < npc.jailedUntil) return;
 
           // Get the NPC's faction
           const npcFaction = npc.faction;
@@ -333,6 +630,11 @@ export class NetworkSystem {
                   this.awardReputation(socket.id, 10);
                 }
 
+                // Killing a Civilian makes you WANTED
+                if (npcFaction === "Civilian") {
+                  this.addWanted(socket.id);
+                }
+
                 // Mission progress (kill objectives)
                 this.missionSystem.onNpcKill(socket.id, npcFaction);
               }
@@ -358,6 +660,9 @@ export class NetworkSystem {
           // 1. If target is Civilian, damage is allowed
           // 2. If attacker and target have the same faction, no damage (friendly fire off)
           if (targetFaction === "Civilian" || targetFaction !== attackerFaction) {
+            // Jailed players are behind bars -- untouchable until release
+            if (targetPlayer.isJailed()) return;
+
             // Damage is allowed
             const wasAlive = targetPlayer.isAlive;
             targetPlayer.takeDamage(amount);
@@ -385,6 +690,17 @@ export class NetworkSystem {
                 const sameFaction = attacker.getCharacter().faction === targetPlayer.getCharacter().faction;
                 this.awardReputation(socket.id, sameFaction ? -10 : 5);
               }
+
+              // Bounty for taking down a WANTED player
+              const bounty = this.collectBounty(socket.id, targetPlayer);
+              if (bounty > 0 && attacker.hasCharacter()) {
+                this.io.emit('bountyClaimed', {
+                  hunter: attacker.getCharacter().name,
+                  target: targetPlayer.hasCharacter() ? targetPlayer.getCharacter().name : '???',
+                  amount: bounty
+                });
+              }
+              this.clearWanted(targetId);
 
               this.applyDeathPenalty(targetId, targetPlayer);
             }
@@ -595,16 +911,18 @@ export class NetworkSystem {
 
   startNPCLoop() {
     setInterval(() => {
+      const now = Date.now();
       const alivePlayers = Array.from(this.players.entries())
-        .filter(([, p]) => p.isAlive && p.hasCharacter())
+        .filter(([, p]) => p.isAlive && p.hasCharacter() && !p.isJailed())
         .map(([id, p]) => ({
           id,
           position: p.getPosition(),
-          faction: p.getCharacter().faction
+          faction: p.getCharacter().faction,
+          wanted: p.wantedStars
         }));
 
       const aliveNpcs = Array.from(this.npcs.entries())
-        .filter(([, n]) => n.isAlive)
+        .filter(([, n]) => n.isAlive && now >= n.jailedUntil)
         .map(([id, n]) => ({
           id,
           position: n.getPosition(),

@@ -13,6 +13,16 @@ export const BUILDINGS = [
   { x: 0, z: 70, halfWidth: 5, halfDepth: 5, height: 16, color: 0xc2a878 }
 ];
 
+// Holding cell next to the Enforcer HQ (kept in sync with the client copy).
+export const JAIL = { x: -52, z: -52, size: 5 };
+
+// Immortal mission-giver NPCs. Talk to your faction's contact for a job.
+export const MISSION_CONTACTS = {
+  Enforcer: { x: -55, z: -45 },
+  Criminal: { x: 54, z: 40 }
+};
+export const CONTACT_INTERACT_RADIUS = 5;
+
 const BODY_RADIUS = 1;
 
 export function resolveBuildingCollision(position) {

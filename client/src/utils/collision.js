@@ -15,6 +15,20 @@ export const BUILDINGS = [
 // provides the only obstacle here) rendered by GameScene.
 export const PLAZA = { x: 40, z: 40, size: 24 };
 
+// Holding cell next to the Enforcer HQ. Arrested Outlaws sit here for a
+// few seconds; the cage itself is visual-only (the server pins jailed
+// entities in place, no collision needed).
+export const JAIL = { x: -52, z: -52, size: 5 };
+
+// Immortal mission-giver NPCs ("contacts"). Talk to your faction's contact
+// to get a job. Enforcer contact stands outside the HQ; Outlaw contact
+// lurks at the plaza's edge.
+export const MISSION_CONTACTS = {
+  Enforcer: { x: -55, z: -45 },
+  Criminal: { x: 54, z: 40 }
+};
+export const CONTACT_INTERACT_RADIUS = 5;
+
 // Half-extent of the 2x2x2 player/NPC boxes, so bodies stop at the wall
 // instead of clipping halfway into it.
 const BODY_RADIUS = 1;

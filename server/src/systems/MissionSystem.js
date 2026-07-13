@@ -78,26 +78,10 @@ export class MissionSystem {
   constructor(networkSystem) {
     this.networkSystem = networkSystem;
     this.missions = new Map();     // socketId -> { template, state, stages, stageIndex, killCount }
-    this.offerTimers = new Map();  // socketId -> timeout
   }
 
-  scheduleOffer(socketId, delayMs = 3000) {
-    this.clearOfferTimer(socketId);
-    const timer = setTimeout(() => {
-      this.offerTimers.delete(socketId);
-      this.offer(socketId);
-    }, delayMs);
-    this.offerTimers.set(socketId, timer);
-  }
-
-  clearOfferTimer(socketId) {
-    const timer = this.offerTimers.get(socketId);
-    if (timer) {
-      clearTimeout(timer);
-      this.offerTimers.delete(socketId);
-    }
-  }
-
+  // Jobs come from your faction's contact NPC now -- the caller
+  // (NetworkSystem) validates the player is actually standing next to it.
   offer(socketId) {
     const player = this.networkSystem.players.get(socketId);
     if (!player || !player.hasCharacter()) return;
@@ -180,8 +164,6 @@ export class MissionSystem {
       });
       console.log(`Mission completed by ${socketId}: ${mission.template.title}`);
     }
-
-    this.scheduleOffer(socketId, 8000);
   }
 
   fail(socketId, reason) {
@@ -190,7 +172,6 @@ export class MissionSystem {
     this.missions.delete(socketId);
     this.networkSystem.io.to(socketId).emit('missionFailed', { reason });
     console.log(`Mission failed for ${socketId}: ${reason}`);
-    this.scheduleOffer(socketId, 8000);
   }
 
   // --- Progress hooks, called from NetworkSystem ---------------------------
@@ -228,6 +209,5 @@ export class MissionSystem {
 
   onDisconnect(socketId) {
     this.missions.delete(socketId);
-    this.clearOfferTimer(socketId);
   }
 }

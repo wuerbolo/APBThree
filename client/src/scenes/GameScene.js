@@ -3,15 +3,23 @@ import { Player } from '../components/Player';
 import { NPC } from '../components/NPC';
 import { NetworkSystem } from '../systems/Network';
 import { HUD } from '../systems/HUD.js';
-import { BUILDINGS, PLAZA, WORLD_SIZE, WORLD_HALF } from '../utils/collision.js';
+import { BUILDINGS, PLAZA, WORLD_SIZE, WORLD_HALF, JAIL, MISSION_CONTACTS, CONTACT_INTERACT_RADIUS } from '../utils/collision.js';
 import { sound } from '../utils/sound.js';
-import { DEAD_COLOR } from '../utils/factionColors.js';
+import { DEAD_COLOR, getFactionColor } from '../utils/factionColors.js';
+import { buildCharacterMesh } from '../utils/characterModel.js';
 
 // Client-side weapon behavior; prices/ownership are validated server-side.
+// auto: hold left click to keep firing. speed: projectile velocity
+// multiplier. zoom: right-click to aim down sights (narrow FOV).
 const WEAPONS = {
   pistol: { damage: 10, cooldown: 250, pellets: 1, spread: 0 },
-  shotgun: { damage: 4, cooldown: 800, pellets: 6, spread: 0.09 }
+  shotgun: { damage: 4, cooldown: 800, pellets: 6, spread: 0.09 },
+  smg: { damage: 4, cooldown: 90, pellets: 1, spread: 0.035, auto: true },
+  sniper: { damage: 50, cooldown: 1500, pellets: 1, spread: 0, speed: 2.5, zoom: true }
 };
+
+const WEAPON_KEYS = { '1': 'pistol', '2': 'shotgun', '3': 'smg', '4': 'sniper' };
+const INTERACT_RADIUS = 4;
 
 export class GameScene {
   constructor() {
@@ -35,6 +43,8 @@ export class GameScene {
     // Weapons
     this.currentWeapon = 'pistol';
     this.lastShotTime = 0;
+    this.mouseDown = false; // for auto-fire weapons
+    this.zoomed = false;    // sniper aim-down-sights
 
     // STORE building, for shop proximity checks
     this.storeBuilding = BUILDINGS.find(b => b.label === 'STORE');
@@ -42,6 +52,18 @@ export class GameScene {
 
     // Active mission beacon (pillar of light at the current objective)
     this.missionBeacon = null;
+
+    // World interactables
+    this.medkits = new Map();
+    this.airdropMesh = null;
+    // Best interaction currently in range ({ type, targetId, isNPC } or null)
+    this.currentInteraction = null;
+
+    // Jail state for the local player (server-enforced; this just locks input)
+    this.jailedUntil = 0;
+
+    // Who's dancing (entity id -> timestamp when the emote ends)
+    this.dancingUntil = new Map();
     
     // Camera controls
     this.cameraMode = 'firstPerson';
@@ -120,8 +142,36 @@ export class GameScene {
     shotgun.position.set(0.45, -0.42, -0.85);
     shotgun.visible = false;
 
-    this.camera.add(pistol, shotgun);
-    this.viewmodels = { pistol, shotgun };
+    // SMG: stubby body, long magazine, short barrel
+    const smg = new THREE.Group();
+    const mBody = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.15, 0.45), gunMaterial);
+    const mBarrel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.2), gunMaterial);
+    mBarrel.position.set(0, 0.04, -0.32);
+    const mMag = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.12), gunMaterial);
+    mMag.position.set(0, -0.22, 0.02);
+    const mGrip = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.18, 0.12), woodMaterial);
+    mGrip.position.set(0, -0.15, 0.16);
+    mGrip.rotation.x = 0.3;
+    smg.add(mBody, mBarrel, mMag, mGrip);
+    smg.position.set(0.45, -0.4, -0.85);
+    smg.visible = false;
+
+    // Sniper: long barrel + scope tube on top
+    const sniper = new THREE.Group();
+    const nBody = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.16, 0.6), gunMaterial);
+    const nBarrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.85), gunMaterial);
+    nBarrel.position.set(0, 0.04, -0.68);
+    const nScope = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.28, 8), gunMaterial);
+    nScope.rotation.x = Math.PI / 2;
+    nScope.position.set(0, 0.14, -0.1);
+    const nStock = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.16, 0.3), woodMaterial);
+    nStock.position.set(0, -0.04, 0.42);
+    sniper.add(nBody, nBarrel, nScope, nStock);
+    sniper.position.set(0.45, -0.42, -0.8);
+    sniper.visible = false;
+
+    this.camera.add(pistol, shotgun, smg, sniper);
+    this.viewmodels = { pistol, shotgun, smg, sniper };
   }
 
   // Keep the viewmodel/crosshair in sync with camera mode, equipped weapon
@@ -130,8 +180,10 @@ export class GameScene {
     const inFirstPerson = this.cameraMode === 'firstPerson'
       && this.isLocalPlayerAlive()
       && this.localPlayer.mesh.visible;
-    this.viewmodels.pistol.visible = inFirstPerson && this.currentWeapon === 'pistol';
-    this.viewmodels.shotgun.visible = inFirstPerson && this.currentWeapon === 'shotgun';
+    for (const [weaponId, model] of Object.entries(this.viewmodels)) {
+      // Hide the viewmodel while zoomed -- it blocks the scoped view
+      model.visible = inFirstPerson && !this.zoomed && this.currentWeapon === weaponId;
+    }
     this.hud.setCrosshairVisible(inFirstPerson);
   }
 
@@ -318,6 +370,109 @@ export class GameScene {
       trash.position.set(spot.x, 0.55, spot.z);
       this.scene.add(trash);
     });
+
+    // Holding cell: a ring of vertical bars next to the HQ. Visual only --
+    // the server pins jailed entities in place, so no collision needed.
+    const barGeometry = new THREE.CylinderGeometry(0.08, 0.08, 3.4, 6);
+    const barMaterial = new THREE.MeshStandardMaterial({ color: 0x37474f });
+    const half = JAIL.size / 2;
+    const barsPerSide = 5;
+    for (let i = 0; i < barsPerSide; i++) {
+      const t = -half + (JAIL.size / (barsPerSide - 1)) * i;
+      for (const [bx, bz] of [[t, -half], [t, half], [-half, t], [half, t]]) {
+        const bar = new THREE.Mesh(barGeometry, barMaterial);
+        bar.position.set(JAIL.x + bx, 1.7, JAIL.z + bz);
+        this.scene.add(bar);
+      }
+    }
+    const jailRoof = new THREE.Mesh(
+      new THREE.BoxGeometry(JAIL.size + 0.4, 0.15, JAIL.size + 0.4),
+      barMaterial
+    );
+    jailRoof.position.set(JAIL.x, 3.4, JAIL.z);
+    this.scene.add(jailRoof);
+
+    // Mission contact NPCs: immortal, static, one per faction, with a
+    // bouncing "!" marker so they read as quest givers from a distance.
+    this.contactMarkers = [];
+    for (const [faction, spot] of Object.entries(MISSION_CONTACTS)) {
+      const rig = buildCharacterMesh(getFactionColor(faction, false));
+      rig.group.position.set(spot.x, 1, spot.z);
+      // Face the plaza/HQ-ish center of the map
+      rig.group.rotation.y = Math.atan2(-spot.x, -spot.z);
+      this.scene.add(rig.group);
+
+      const marker = this.createBuildingLabel('!');
+      marker.scale.set(1.2, 1.6, 1);
+      marker.position.set(spot.x, 3.4, spot.z);
+      this.scene.add(marker);
+      this.contactMarkers.push(marker);
+    }
+  }
+
+  // --- World pickups & events ----------------------------------------------
+
+  addMedkit(id, position) {
+    const kit = new THREE.Group();
+    const box = new THREE.Mesh(
+      new THREE.BoxGeometry(0.7, 0.4, 0.7),
+      new THREE.MeshStandardMaterial({ color: 0xf5f5f5 })
+    );
+    box.position.y = 0.2;
+    const crossMaterial = new THREE.MeshStandardMaterial({ color: 0xd32f2f });
+    const crossA = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.06, 0.14), crossMaterial);
+    crossA.position.y = 0.43;
+    const crossB = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.06, 0.42), crossMaterial);
+    crossB.position.y = 0.43;
+    kit.add(box, crossA, crossB);
+    kit.position.set(position.x, 0, position.z);
+    this.scene.add(kit);
+    this.medkits.set(id, kit);
+  }
+
+  removeMedkit(id) {
+    const kit = this.medkits.get(id);
+    if (kit) {
+      this.scene.remove(kit);
+      this.medkits.delete(id);
+    }
+  }
+
+  addAirdrop(drop) {
+    this.removeAirdrop();
+    const group = new THREE.Group();
+    const crate = new THREE.Mesh(
+      new THREE.BoxGeometry(1.6, 1.2, 1.6),
+      new THREE.MeshStandardMaterial({ color: 0xffb300 })
+    );
+    crate.position.y = 0.6;
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.2, 1.2, 60, 12, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0xff6f00,
+        transparent: true,
+        opacity: 0.3,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      })
+    );
+    beam.position.y = 30;
+    group.add(crate, beam);
+    group.userData.crate = crate;
+    group.position.set(drop.position.x, 0, drop.position.z);
+    this.scene.add(group);
+    this.airdropMesh = group;
+  }
+
+  removeAirdrop() {
+    if (this.airdropMesh) {
+      this.scene.remove(this.airdropMesh);
+      this.airdropMesh = null;
+    }
+  }
+
+  isLocalPlayerJailed() {
+    return Date.now() < this.jailedUntil;
   }
 
   // A billboard sprite so labels like "STORE" stay readable from both
@@ -384,8 +539,7 @@ export class GameScene {
         }
       }
       // Weapon switching
-      if (event.key === '1') this.equipWeapon('pistol');
-      if (event.key === '2') this.equipWeapon('shotgun');
+      if (WEAPON_KEYS[event.key]) this.equipWeapon(WEAPON_KEYS[event.key]);
       // Shop (only near the STORE)
       if ((event.key === 'e' || event.key === 'E') && this.isLocalPlayerAlive()) {
         if (this.hud.isShopOpen()) {
@@ -400,6 +554,14 @@ export class GameScene {
           this.network.socket.emit('missionAccept');
         }
       }
+      // Contextual interaction: talk / revive / arrest
+      if ((event.key === 'f' || event.key === 'F') && this.isLocalPlayerAlive() && !this.isLocalPlayerJailed()) {
+        this.executeInteraction();
+      }
+      // Dance emote
+      if ((event.key === 'g' || event.key === 'G') && this.isLocalPlayerAlive()) {
+        this.network.socket.emit('emote', 'dance');
+      }
     });
 
     window.addEventListener('keyup', (event) => {
@@ -408,8 +570,23 @@ export class GameScene {
       }
     });
 
-    // Shooting
-    document.addEventListener('mousedown', this.handleShot.bind(this));
+    // Shooting: left click fires (hold to auto-fire with the SMG); right
+    // click aims down the sniper scope.
+    document.addEventListener('mousedown', (event) => {
+      if (event.button === 0) {
+        this.mouseDown = true;
+        this.tryShoot();
+      } else if (event.button === 2) {
+        if (this.currentWeapon === 'sniper' && this.cameraMode === 'firstPerson' && this.isLocalPlayerAlive()) {
+          this.setZoom(true);
+        }
+      }
+    });
+    document.addEventListener('mouseup', (event) => {
+      if (event.button === 0) this.mouseDown = false;
+      if (event.button === 2) this.setZoom(false);
+    });
+    document.addEventListener('contextmenu', (event) => event.preventDefault());
 
     // Zoom the top-down camera in/out with the scroll wheel
     document.addEventListener('wheel', (event) => {
@@ -458,12 +635,79 @@ export class GameScene {
       if (!owned) return;
     }
     this.currentWeapon = weaponId;
+    if (weaponId !== 'sniper') this.setZoom(false);
     this.hud.updateWeaponStat(weaponId);
   }
 
-  handleShot(event) {
-    if (event.button !== 0) return; // Left click only
+  setZoom(zoomed) {
+    if (this.zoomed === zoomed) return;
+    this.zoomed = zoomed;
+    this.camera.fov = zoomed ? 28 : 75;
+    this.camera.updateProjectionMatrix();
+  }
+
+  // Which nearby thing F would act on right now. Recomputed every frame in
+  // update(); also drives the HUD prompt.
+  findInteraction() {
+    if (!this.localPlayer || !this.isLocalPlayerAlive() || this.isLocalPlayerJailed() || !this.character) {
+      return null;
+    }
+    const myPos = this.localPlayer.mesh.position;
+    const myFaction = this.character.faction;
+
+    // 1. Faction contact: get a job (unless one is already active)
+    const contact = MISSION_CONTACTS[myFaction];
+    if (contact && !this.hud.hasActiveMission()) {
+      const dx = myPos.x - contact.x;
+      const dz = myPos.z - contact.z;
+      if (Math.sqrt(dx * dx + dz * dz) <= CONTACT_INTERACT_RADIUS) {
+        return { type: 'contact', prompt: '[F] Talk to your contact' };
+      }
+    }
+
+    if (myFaction === 'Enforcer') {
+      // 2. Revive a downed Civilian
+      for (const [id, npc] of this.npcs) {
+        if (npc.faction === 'Civilian' && !npc.isAlive
+            && myPos.distanceTo(npc.mesh.position) <= INTERACT_RADIUS) {
+          return { type: 'revive', targetId: id, prompt: '[F] Revive Civilian (+$10)' };
+        }
+      }
+      // 3. Arrest an Outlaw (NPC or player)
+      for (const [id, npc] of this.npcs) {
+        if (npc.faction === 'Criminal' && npc.isAlive
+            && myPos.distanceTo(npc.mesh.position) <= INTERACT_RADIUS) {
+          return { type: 'arrest', targetId: id, isNPC: true, prompt: '[F] Arrest Outlaw' };
+        }
+      }
+      for (const [id, player] of this.remotePlayers) {
+        if (player.isAlive && player.character && player.character.faction === 'Criminal'
+            && myPos.distanceTo(player.mesh.position) <= INTERACT_RADIUS) {
+          return { type: 'arrest', targetId: id, isNPC: false, prompt: '[F] Arrest Outlaw' };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  executeInteraction() {
+    const interaction = this.currentInteraction;
+    if (!interaction) return;
+    if (interaction.type === 'contact') {
+      this.network.socket.emit('requestMission');
+    } else if (interaction.type === 'revive') {
+      this.network.socket.emit('reviveCivilian', interaction.targetId);
+      sound.heal();
+    } else if (interaction.type === 'arrest') {
+      this.network.socket.emit('arrest', { targetId: interaction.targetId, isNPC: interaction.isNPC });
+      sound.arrest();
+    }
+  }
+
+  tryShoot() {
     if (!this.isLocalPlayerAlive()) return;
+    if (this.isLocalPlayerJailed()) return;
     if (this.hud.isShopOpen()) return;
 
     const weapon = WEAPONS[this.currentWeapon];
@@ -494,6 +738,7 @@ export class GameScene {
 
       const mesh = this.createTracerMesh(origin, direction);
       mesh.damage = weapon.damage;
+      mesh.speed = weapon.speed || 1;
       // Only the shooter's client reports damage for its own projectiles;
       // observers just render them.
       mesh.isLocal = true;
@@ -508,11 +753,12 @@ export class GameScene {
       });
     }
 
-    if (this.currentWeapon === 'shotgun') {
-      sound.shootShotgun();
-    } else {
-      sound.shootPistol();
-    }
+    const shotSounds = {
+      shotgun: sound.shootShotgun,
+      smg: sound.shootSmg,
+      sniper: sound.shootSniper
+    };
+    (shotSounds[this.currentWeapon] || sound.shootPistol)();
 
     this.network.sendShot({ weapon: this.currentWeapon, pellets });
   }
@@ -641,11 +887,12 @@ export class GameScene {
     }
   }
 
-  handleRemoteShot(id, position, direction) {
+  handleRemoteShot(id, position, direction, weapon) {
     if (!this.projectiles.has(id)) {
       const pos = new THREE.Vector3(...position);
       const dir = new THREE.Vector3(...direction);
       const mesh = this.createTracerMesh(pos, dir);
+      mesh.speed = (WEAPONS[weapon] && WEAPONS[weapon].speed) || 1;
       this.scene.add(mesh);
       this.projectiles.set(id, mesh);
     }
@@ -675,8 +922,9 @@ export class GameScene {
   }
 
   update() {
-    // Update local player
-    if (this.localPlayer) {
+    // Update local player (frozen while jailed -- the server ignores our
+    // position updates then anyway)
+    if (this.localPlayer && !this.isLocalPlayerJailed()) {
       const otherPositions = [];
       this.remotePlayers.forEach(player => {
         if (player.isAlive) otherPositions.push(player.mesh.position);
@@ -688,6 +936,11 @@ export class GameScene {
       this.localPlayer.update(this.cameraMode, this.camera, otherPositions);
       this.network.sendPosition(this.localPlayer.getPosition());
       this.hud.updateHealthStat(this.localPlayer.health);
+
+      // Auto-fire while the button is held (SMG)
+      if (this.mouseDown && WEAPONS[this.currentWeapon].auto) {
+        this.tryShoot();
+      }
 
       // STORE proximity: show/hide the "press E" prompt
       const sdx = this.localPlayer.mesh.position.x - this.storeBuilding.x;
@@ -702,9 +955,53 @@ export class GameScene {
           this.hud.closeShop();
         }
       }
+
+      // Contextual interaction prompt (talk / revive / arrest)
+      this.currentInteraction = this.findInteraction();
+      this.hud.setInteractPrompt(this.currentInteraction ? this.currentInteraction.prompt : null);
+
+      // Walk over a medkit to heal (only useful when hurt)
+      if (this.localPlayer.health < 100) {
+        this.medkits.forEach((kit, id) => {
+          const dx = this.localPlayer.mesh.position.x - kit.position.x;
+          const dz = this.localPlayer.mesh.position.z - kit.position.z;
+          if (Math.sqrt(dx * dx + dz * dz) < 2) {
+            this.network.socket.emit('collectMedkit', id);
+            this.removeMedkit(id);
+            sound.heal();
+          }
+        });
+      }
+    } else if (this.localPlayer) {
+      this.hud.setInteractPrompt(null);
     }
 
     this.updateViewmodel();
+
+    // Dance emotes: spin the whole rig and flail the limbs until the timer
+    // runs out. Walk animation takes back over naturally afterwards.
+    if (this.dancingUntil.size > 0) {
+      const now = Date.now();
+      this.dancingUntil.forEach((until, id) => {
+        if (now > until) {
+          this.dancingUntil.delete(id);
+          return;
+        }
+        const entity = id === this.network.socket.id ? this.localPlayer : this.remotePlayers.get(id);
+        if (!entity || !entity.rig) return;
+        entity.mesh.rotation.y += 0.25;
+        const wave = Math.sin(now / 90) * 1.1;
+        entity.rig.limbs.leftArm.rotation.x = wave;
+        entity.rig.limbs.rightArm.rotation.x = -wave;
+        entity.rig.limbs.leftLeg.rotation.x = -wave * 0.4;
+        entity.rig.limbs.rightLeg.rotation.x = wave * 0.4;
+      });
+    }
+
+    // Airdrop crate slowly spins so it catches the eye
+    if (this.airdropMesh) {
+      this.airdropMesh.userData.crate.rotation.y += 0.02;
+    }
 
     // Update NPCs
     this.npcs.forEach(npc => npc.update(this.camera));
@@ -730,9 +1027,9 @@ export class GameScene {
         return;
       }
 
-      // Move projectile
+      // Move projectile (sniper rounds travel faster)
       projectile.position.add(
-        projectile.direction.clone().multiplyScalar(1)
+        projectile.direction.clone().multiplyScalar(projectile.speed || 1)
       );
 
       // Check for collisions with players and NPCs

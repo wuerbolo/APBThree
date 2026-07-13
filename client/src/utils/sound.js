@@ -95,5 +95,31 @@ export const sound = {
     tone({ freq: 330, duration: 0.18, type: 'sawtooth', volume: 0.07 });
     tone({ freq: 262, duration: 0.18, type: 'sawtooth', volume: 0.07, delay: 0.18 });
     tone({ freq: 196, duration: 0.35, type: 'sawtooth', volume: 0.08, delay: 0.36 });
+  },
+
+  shootSmg() {
+    noise({ duration: 0.04, volume: 0.08, lowpass: 3200 });
+    tone({ freq: 1100, endFreq: 500, duration: 0.04, type: 'square', volume: 0.03 });
+  },
+
+  shootSniper() {
+    noise({ duration: 0.35, volume: 0.22, lowpass: 700 });
+    tone({ freq: 150, endFreq: 40, duration: 0.35, type: 'sawtooth', volume: 0.1 });
+  },
+
+  heal() {
+    tone({ freq: 440, duration: 0.1, type: 'sine', volume: 0.08 });
+    tone({ freq: 587, duration: 0.14, type: 'sine', volume: 0.08, delay: 0.1 });
+  },
+
+  arrest() {
+    // Handcuff clink: two short metallic snaps
+    tone({ freq: 1800, endFreq: 900, duration: 0.05, type: 'square', volume: 0.08 });
+    tone({ freq: 1600, endFreq: 800, duration: 0.06, type: 'square', volume: 0.08, delay: 0.09 });
+  },
+
+  airdropAlert() {
+    tone({ freq: 392, duration: 0.22, type: 'triangle', volume: 0.1 });
+    tone({ freq: 523, duration: 0.32, type: 'triangle', volume: 0.1, delay: 0.22 });
   }
 };

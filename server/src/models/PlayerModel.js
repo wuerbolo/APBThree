@@ -5,6 +5,18 @@ export class PlayerModel {
     this.health = 100;
     this.isAlive = true;
     this.character = null; // Will hold character data
+
+    // WANTED system (session-scoped, not persisted): stars from killing
+    // Civilians; decays over time, cleared on death/arrest.
+    this.wantedStars = 0;
+    this.lastWantedAt = 0;
+
+    // While jailed (arrested), position updates are ignored until released.
+    this.jailedUntil = 0;
+  }
+
+  isJailed() {
+    return Date.now() < this.jailedUntil;
   }
 
   updatePosition(position) {

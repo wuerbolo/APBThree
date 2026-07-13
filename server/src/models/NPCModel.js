@@ -30,6 +30,10 @@ export class NPCModel {
     this.attackDamage = 8;
     this.lastAttackTime = 0;
 
+    // While jailed (arrested Outlaw NPCs), the NPC is pinned in the cell
+    // and does nothing until this timestamp passes.
+    this.jailedUntil = 0;
+
     // Assign a faction if not provided
     this.faction = faction || randomNPCFaction();
   }
@@ -48,6 +52,7 @@ export class NPCModel {
   // is closest.
   update(alivePlayers = [], aliveNpcs = []) {
     if (!this.isAlive) return { position: this.position, attack: null };
+    if (Date.now() < this.jailedUntil) return { position: this.position, attack: null };
 
     let attack = null;
     const target = this.findChaseTarget(alivePlayers, aliveNpcs);
@@ -124,7 +129,13 @@ export class NPCModel {
       if (candidate.faction !== opposingFaction) return;
       const dx = candidate.position.x - this.position.x;
       const dz = candidate.position.z - this.position.z;
-      const dist = Math.sqrt(dx * dx + dz * dz);
+      let dist = Math.sqrt(dx * dx + dz * dz);
+      // Manhunt: heavily WANTED targets draw aggro from twice as far and
+      // win ties against closer, less notorious targets.
+      if ((candidate.wanted || 0) >= 3) {
+        if (dist > this.chaseRange * 2) return;
+        dist = dist / 2;
+      }
       if (dist < closestDist) {
         closestDist = dist;
         closest = { id: candidate.id, position: candidate.position, type };
