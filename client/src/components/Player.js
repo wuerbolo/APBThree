@@ -50,16 +50,16 @@ export class Player {
     const gunGroup = new THREE.Group();
     const gunMaterial = new THREE.MeshStandardMaterial({ color: 0x222222 });
 
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.5), gunMaterial);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 1.0), gunMaterial);
     gunGroup.add(body);
 
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.4), gunMaterial);
-    barrel.position.z = -0.4;
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.8), gunMaterial);
+    barrel.position.z = -0.8;
     gunGroup.add(barrel);
 
     // Held at the right hand: just outside the right arm (arm pivot at
-    // x=0.56 plus arm width), around hand height, slightly forward.
-    gunGroup.position.set(0.78, -0.15, -0.3);
+    // x=1.12 plus arm width), around hand height, slightly forward.
+    gunGroup.position.set(1.56, 0.7, -0.6);
 
     this.gun = gunGroup;
     this.mesh.add(this.gun);
@@ -102,7 +102,7 @@ export class Player {
     });
 
     this.healthBar = new THREE.Mesh(healthBarGeometry, healthBarMaterial);
-    this.healthBar.position.y = 2.5; // Position above player
+    this.healthBar.position.y = 3.3; // Just above the (doubled-size) head
 
     // Create a container for the health bar that will handle the billboard effect
     this.healthBarContainer = new THREE.Object3D();
@@ -269,7 +269,7 @@ export class Player {
     const moved = Math.sqrt(dx * dx + dz * dz);
     animateWalk(this.rig, moved);
     if (moved > 0.01) {
-      this.mesh.rotation.y = Math.atan2(dx, dz);
+      this.mesh.rotation.y = Math.atan2(-dx, -dz); // gun/front faces local -Z
     }
     this._lastAnimPosition.copy(this.mesh.position);
 
@@ -286,7 +286,7 @@ export class Player {
       const moved = Math.sqrt(dx * dx + dz * dz);
       animateWalk(this.rig, moved);
       if (moved > 0.01) {
-        this.mesh.rotation.y = Math.atan2(dx, dz);
+        this.mesh.rotation.y = Math.atan2(-dx, -dz); // gun/front faces local -Z
       }
     }
     this.mesh.position.set(position.x, position.y, position.z);
