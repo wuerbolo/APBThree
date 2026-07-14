@@ -66,3 +66,18 @@ assuming there's nothing to do next.
   work; the VPS instance handles deploys and ops.
 - Non-trivial changes go on a feature branch + PR rather than pushing straight
   to master, so the VPS instance can review/merge/deploy deliberately.
+
+## Agent skills
+
+### Issue tracker
+
+Trello, via the `trello-tasks` skill (board linked at `.claude/trello-board.json`) --
+see the "Task tracking" section above for the day-to-day convention. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five canonical roles (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), applied as Trello labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context (one `CONTEXT.md` + `docs/adr/` at the repo root; `client/`+`server/` are one game, not separate domains). See `docs/agents/domain.md`.
