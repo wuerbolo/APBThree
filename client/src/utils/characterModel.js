@@ -60,6 +60,8 @@ export function buildCharacterMesh(initialBodyColor) {
   return {
     group,
     bodyMaterial,
+    torso,
+    head,
     limbs: { leftLeg, rightLeg, leftArm, rightArm },
     // Where cosmetics (hats) attach: top of the head
     headAnchorY: 2.9

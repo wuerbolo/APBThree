@@ -537,6 +537,7 @@ export class GameScene {
         if (this.cameraMode === 'topDown' && document.pointerLockElement) {
           document.exitPointerLock();
         }
+        if (this.localPlayer) this.localPlayer.setFirstPersonView(this.cameraMode === 'firstPerson');
       }
       // Weapon switching
       if (WEAPON_KEYS[event.key]) this.equipWeapon(WEAPON_KEYS[event.key]);
@@ -715,16 +716,34 @@ export class GameScene {
     if (now - this.lastShotTime < weapon.cooldown) return;
     this.lastShotTime = now;
 
+    // Fire from the actual gun muzzle, not a rough body-center offset.
+    this.localPlayer.mesh.updateMatrixWorld(true);
+    const origin = new THREE.Vector3();
+    this.localPlayer.gun.getWorldPosition(origin);
+
     let baseDirection;
     if (this.cameraMode === 'firstPerson') {
-      baseDirection = new THREE.Vector3(0, 0, -1);
-      baseDirection.applyQuaternion(this.camera.quaternion);
+      // The gun muzzle sits off to the side of and below the camera (it's
+      // attached to the hand, not the eye), so aiming it straight along the
+      // camera's forward vector makes the tracer visibly miss the crosshair.
+      // Instead, aim at the point the crosshair is actually looking at --
+      // far enough out that any weapon's max range lands well short of it --
+      // and point the muzzle at *that*. This converges the visible shot
+      // onto the crosshair the way real FPS guns do, without needing the
+      // gun rendered exactly at the camera position.
+      const camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+      const aimPoint = this.camera.position.clone().addScaledVector(camForward, 500);
+      baseDirection = aimPoint.sub(origin).normalize();
     } else {
-      baseDirection = new THREE.Vector3(0, -0.5, -1);
-      baseDirection.normalize();
+      // Top-down: no free-look camera to aim with, so shots fire flat and
+      // straight along the character's own facing (same convention as
+      // movement-facing: rotation.y = theta -> world forward
+      // (-sin theta, -cos theta)). No downward tilt -- that was aiming
+      // shots into the ground, cutting their visible range short.
+      const rotY = this.localPlayer.mesh.rotation.y;
+      baseDirection = new THREE.Vector3(-Math.sin(rotY), 0, -Math.cos(rotY));
     }
 
-    const origin = this.localPlayer.mesh.position.clone().add(new THREE.Vector3(0, 4, 0)); // roughly hand/gun height on the doubled-size model
     const pellets = [];
 
     for (let i = 0; i < weapon.pellets; i++) {
@@ -768,6 +787,7 @@ export class GameScene {
     this.localPlayer = new Player(id, true);
     this.scene.add(this.localPlayer.mesh);
     this.localPlayer.setPosition(position);
+    this.localPlayer.setFirstPersonView(this.cameraMode === 'firstPerson');
   }
 
   addRemotePlayer(id, position, characterData) {
@@ -1130,7 +1150,7 @@ export class GameScene {
         this.camera.rotation.y = this.yaw;
         this.camera.rotation.x = this.pitch;
         this.camera.position.copy(this.localPlayer.mesh.position);
-        this.camera.position.y += 5; // eye height for the doubled-size character model
+        this.camera.position.y += 2.7; // eye height -- just below the top of the head (local head top is y=2.9)
       } else {
         this.camera.position.set(
           this.localPlayer.mesh.position.x,

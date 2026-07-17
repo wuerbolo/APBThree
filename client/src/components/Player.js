@@ -71,6 +71,19 @@ export class Player {
     this.bodyMaterial.color.setHex(hex);
   }
 
+  // In first-person, seeing your own head/torso/legs from inside the model
+  // makes the camera (parked at eye height) feel like it's floating way
+  // above everyone else. Hide the body and just show the gun arm, like a
+  // regular FPS -- cheaper than clipping and looks fine for now.
+  setFirstPersonView(enabled) {
+    this.rig.torso.visible = !enabled;
+    this.rig.head.visible = !enabled;
+    this.rig.limbs.leftLeg.visible = !enabled;
+    this.rig.limbs.rightLeg.visible = !enabled;
+    this.rig.limbs.leftArm.visible = !enabled;
+    if (this.hat) this.hat.visible = !enabled;
+  }
+
   // Swap the equipped cosmetic (hat) to match character data.
   applyCosmetic(cosmeticId) {
     if (this.hat) {
@@ -268,7 +281,13 @@ export class Player {
     const dz = this.mesh.position.z - this._lastAnimPosition.z;
     const moved = Math.sqrt(dx * dx + dz * dz);
     animateWalk(this.rig, moved);
-    if (moved > 0.01) {
+    if (cameraMode === 'firstPerson') {
+      // Body/gun always face the same way the camera looks -- otherwise the
+      // gun (offset to the body's right in local space) ends up pointing
+      // wherever you last walked instead of where the crosshair is, and
+      // shots fired from its muzzle drift off to the side of the aim ray.
+      this.mesh.rotation.y = camera.rotation.y;
+    } else if (moved > 0.01) {
       this.mesh.rotation.y = Math.atan2(-dx, -dz); // gun/front faces local -Z
     }
     this._lastAnimPosition.copy(this.mesh.position);
