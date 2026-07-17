@@ -953,6 +953,45 @@ export class NetworkSystem {
         }
       });
 
+      // Switch factions mid-game (the "N" key). Treated like a respawn --
+      // full heal, teleport to the new faction's spawn -- since letting
+      // someone swap sides in the middle of a fight (still at low health,
+      // still standing where the old faction's enemies are) would be an
+      // easy way to dodge a losing fight or camp the other side's spawn.
+      socket.on('changeFaction', (faction, callback) => {
+        const player = this.players.get(socket.id);
+        const respond = (result) => { if (typeof callback === 'function') callback(result); };
+        if (!player || !player.hasCharacter()) {
+          return respond({ success: false, error: 'No character yet' });
+        }
+        if (faction !== 'Criminal' && faction !== 'Enforcer') {
+          return respond({ success: false, error: 'Invalid faction' });
+        }
+        if (player.isJailed()) {
+          return respond({ success: false, error: 'Cannot change faction while arrested' });
+        }
+
+        const character = player.getCharacter();
+        if (character.faction === faction) {
+          return respond({ success: true, character: character.getData(), position: player.position });
+        }
+
+        this.characterSystem.updateCharacter(playerKey, { faction });
+        const position = getSpawnPositionForFaction(faction);
+        player.health = 100;
+        player.isAlive = true;
+        player.updatePosition(position);
+
+        respond({ success: true, character: character.getData(), position });
+
+        this.io.emit('playerRespawned', { id: socket.id, position });
+        this.io.emit('updateHealth', { id: socket.id, health: player.health, isAlive: true, isNPC: false });
+        // characterUpdated (self) applies the new faction color/HUD locally;
+        // playerUpdated (everyone else) recolors this player on their screens.
+        socket.emit('characterUpdated', character.getData());
+        socket.broadcast.emit('playerUpdated', { id: socket.id, character: character.getData() });
+      });
+
       // Handle disconnection
       socket.on('disconnect', () => {
         console.log(`Player disconnected: ${socket.id} from ${clientIp}`);

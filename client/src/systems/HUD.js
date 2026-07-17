@@ -77,6 +77,7 @@ export class HUD {
     }
 
     showRespawnButton() {
+        if (document.pointerLockElement) document.exitPointerLock();
         const button = document.createElement('button');
         button.textContent = 'Respawn';
         button.style.cssText = `
@@ -109,12 +110,16 @@ export class HUD {
             this.gameScene.handleRespawn();
             this.hideDeathTint();
             button.remove();
+            if (this.gameScene.cameraMode === 'firstPerson') {
+                this.gameScene.renderer.domElement.requestPointerLock();
+            }
         };
 
         document.body.appendChild(button);
     }
 
     showFactionSelection() {
+        if (document.pointerLockElement) document.exitPointerLock();
         const overlay = document.createElement('div');
         overlay.id = 'factionSelection';
         overlay.style.cssText = `
@@ -170,12 +175,18 @@ export class HUD {
             const name = nameInput.value || `${getFactionDisplayName('Criminal')}${Math.floor(Math.random() * 1000)}`;
             this.selectFaction('Criminal', name);
             overlay.remove();
+            if (this.gameScene.cameraMode === 'firstPerson') {
+                this.gameScene.renderer.domElement.requestPointerLock();
+            }
         };
 
         enforcerButton.onclick = () => {
             const name = nameInput.value || `Enforcer${Math.floor(Math.random() * 1000)}`;
             this.selectFaction('Enforcer', name);
             overlay.remove();
+            if (this.gameScene.cameraMode === 'firstPerson') {
+                this.gameScene.renderer.domElement.requestPointerLock();
+            }
         };
 
         buttonsContainer.appendChild(criminalButton);
@@ -239,7 +250,91 @@ export class HUD {
     selectFaction(faction, name) {
         this.gameScene.network.createCharacter(name, faction);
     }
-    
+
+    isFactionChangeMenuOpen() {
+        return !!document.getElementById('faction-change-overlay');
+    }
+
+    // "N" key: switch sides mid-game. Unlike showFactionSelection (initial
+    // character creation, needs a name), this just picks a faction on the
+    // existing character -- server treats it like a respawn into the new
+    // faction's spawn.
+    showFactionChangeMenu(currentFaction) {
+        if (this.isFactionChangeMenuOpen()) return;
+        if (document.pointerLockElement) document.exitPointerLock();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'faction-change-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1200;
+            font-family: Arial, sans-serif;
+        `;
+
+        const title = document.createElement('h1');
+        title.textContent = 'Switch Faction';
+        title.style.cssText = `
+            color: #ffffff;
+            font-size: 40px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+            margin-bottom: 10px;
+        `;
+
+        const hint = document.createElement('div');
+        hint.textContent = 'Full heal, teleport to your new side\'s spawn. Press N or Esc to cancel.';
+        hint.style.cssText = `color: #aaaaaa; font-size: 14px; margin-bottom: 30px;`;
+
+        const buttonsContainer = document.createElement('div');
+        buttonsContainer.style.cssText = `
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+            max-width: 600px;
+        `;
+
+        const criminalButton = this.createFactionButton('Criminal', '#d32f2f', 'Operate outside the law, gain reputation by defeating Enforcers.');
+        const enforcerButton = this.createFactionButton('Enforcer', '#1976d2', `Uphold the law, gain reputation by defeating ${getFactionDisplayName('Criminal')}s.`);
+
+        criminalButton.onclick = () => this.gameScene.network.changeFaction('Criminal');
+        enforcerButton.onclick = () => this.gameScene.network.changeFaction('Enforcer');
+
+        buttonsContainer.appendChild(criminalButton);
+        buttonsContainer.appendChild(enforcerButton);
+
+        const error = document.createElement('div');
+        error.id = 'faction-change-error';
+        error.style.cssText = `color: #ff5252; font-size: 14px; margin-top: 16px; min-height: 18px;`;
+
+        overlay.appendChild(title);
+        overlay.appendChild(hint);
+        overlay.appendChild(buttonsContainer);
+        overlay.appendChild(error);
+        document.body.appendChild(overlay);
+    }
+
+    closeFactionChangeMenu() {
+        const overlay = document.getElementById('faction-change-overlay');
+        if (overlay) overlay.remove();
+        if (this.gameScene && this.gameScene.cameraMode === 'firstPerson') {
+            this.gameScene.renderer.domElement.requestPointerLock();
+        }
+    }
+
+    showFactionChangeError(message) {
+        const el = document.getElementById('faction-change-error');
+        if (el) el.textContent = message;
+    }
+
     showCharacterInfo(character) {
         // Create or update character info display
         let infoPanel = document.getElementById('character-info');
@@ -459,6 +554,68 @@ export class HUD {
             };
             tabRow.appendChild(tab);
         }
+    }
+
+    // Hold-Tab roster: who's online per faction, plus how many bots are
+    // currently active. Pure display -- pointer-events: none so it never
+    // steals the click that would otherwise go to gameplay, and it doesn't
+    // touch pointer lock (unlike the shop/respawn/faction menus) since
+    // there's nothing to click.
+    showRoster({ players, bots }) {
+        let panel = document.getElementById('roster-overlay');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'roster-overlay';
+            panel.style.cssText = `
+                position: fixed;
+                top: 60px;
+                left: 50%;
+                transform: translateX(-50%);
+                background-color: rgba(10, 10, 10, 0.9);
+                color: white;
+                padding: 20px 30px;
+                border-radius: 8px;
+                border: 2px solid #555;
+                font-family: Arial, sans-serif;
+                z-index: 1150;
+                min-width: 420px;
+                pointer-events: none;
+            `;
+            document.body.appendChild(panel);
+        }
+
+        const factionColor = (faction) =>
+            faction === 'Criminal' ? '#ff5252' : faction === 'Enforcer' ? '#64b5f6' : '#81c784';
+
+        const column = (faction, label) => {
+            const entries = players.filter(p => p.faction === faction);
+            const rows = entries.length
+                ? entries.map(p => `<div style="opacity:${p.isAlive ? '1' : '0.4'};">${p.isLocal ? '&#10148; ' : ''}${p.name}${p.isAlive ? '' : ' (down)'}</div>`).join('')
+                : '<div style="opacity:0.5;">Nobody online</div>';
+            const botCount = bots[faction] || 0;
+            return `
+                <div style="flex:1; min-width:180px;">
+                    <div style="font-weight:bold; color:${factionColor(faction)}; margin-bottom:6px;">${label} (${entries.length})</div>
+                    ${rows}
+                    <div style="opacity:0.6; font-size:12px; margin-top:6px;">${botCount} active bot${botCount === 1 ? '' : 's'}</div>
+                </div>
+            `;
+        };
+
+        const civilianBots = bots.Civilian || 0;
+        panel.innerHTML = `
+            <div style="font-weight:bold; margin-bottom:12px; text-align:center;">Online</div>
+            <div style="display:flex; gap:24px;">
+                ${column('Criminal', getFactionDisplayName('Criminal'))}
+                ${column('Enforcer', 'Enforcer')}
+            </div>
+            <div style="opacity:0.5; font-size:12px; margin-top:12px; text-align:center;">${civilianBots} civilian bot${civilianBots === 1 ? '' : 's'} active</div>
+        `;
+    }
+
+    hideRoster() {
+        const panel = document.getElementById('roster-overlay');
+        if (panel) panel.remove();
     }
 
     // --- Faction rounds ------------------------------------------------------
@@ -689,6 +846,10 @@ export class HUD {
 
     openShop(character) {
         if (this.isShopOpen()) return;
+        // Interactive menus need a visible, free-moving cursor -- pointer
+        // lock (used for FPS mouselook) hides it and eats all mouse
+        // movement, so buttons would be unclickable without an ESC first.
+        if (document.pointerLockElement) document.exitPointerLock();
         const overlay = document.createElement('div');
         overlay.id = 'shop-overlay';
         overlay.style.cssText = `
@@ -793,6 +954,11 @@ export class HUD {
     closeShop() {
         const overlay = document.getElementById('shop-overlay');
         if (overlay) overlay.remove();
+        // Back to normal gameplay -- re-capture the mouse for FPS look
+        // instead of leaving the cursor visible until the next stray click.
+        if (this.gameScene && this.gameScene.cameraMode === 'firstPerson') {
+            this.gameScene.renderer.domElement.requestPointerLock();
+        }
     }
 
     // Death penalty: roll the money/reputation numbers down from their old

@@ -417,6 +417,21 @@ export class NetworkSystem {
     });
   }
 
+  changeFaction(faction) {
+    this.socket.emit('changeFaction', faction, (response) => {
+      if (response && response.success) {
+        this.gameScene.character = response.character;
+        this.gameScene.hud.showCharacterInfo(response.character);
+        this.gameScene.hud.closeFactionChangeMenu();
+        // Health/position/recolor arrive via the server's playerRespawned +
+        // characterUpdated broadcasts (same path a normal respawn uses), so
+        // there's nothing else to apply here.
+      } else {
+        this.gameScene.hud.showFactionChangeError((response && response.error) || 'Faction change failed');
+      }
+    });
+  }
+
   buyWeapon(weaponId) {
     this.socket.emit('buyWeapon', weaponId, (response) => {
       if (response && response.success) {

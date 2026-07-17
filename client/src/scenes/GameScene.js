@@ -563,11 +563,31 @@ export class GameScene {
       if ((event.key === 'g' || event.key === 'G') && this.isLocalPlayerAlive()) {
         this.network.socket.emit('emote', 'dance');
       }
+      // Switch factions
+      if ((event.key === 'n' || event.key === 'N') && this.character && !this.isLocalPlayerJailed()) {
+        if (this.hud.isFactionChangeMenuOpen()) {
+          this.hud.closeFactionChangeMenu();
+        } else {
+          this.hud.showFactionChangeMenu(this.character.faction);
+        }
+      }
+      // Roster: hold Tab to see who's online and which bots are active
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        this.hud.showRoster(this.buildRoster());
+      }
     });
 
     window.addEventListener('keyup', (event) => {
       if (this.localPlayer) {
         this.localPlayer.handleKeyUp(event);
+      }
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        this.hud.hideRoster();
+      }
+      if (event.key === 'Escape' && this.hud.isFactionChangeMenuOpen()) {
+        this.hud.closeFactionChangeMenu();
       }
     });
 
@@ -610,6 +630,37 @@ export class GameScene {
 
   isLocalPlayerAlive() {
     return !!this.localPlayer && this.localPlayer.isAlive;
+  }
+
+  // Snapshot for the hold-Tab roster: online players grouped by faction,
+  // plus a count of currently-alive NPCs per faction ("active bots").
+  buildRoster() {
+    const players = [];
+    if (this.character) {
+      players.push({
+        name: this.character.name,
+        faction: this.character.faction,
+        isAlive: this.isLocalPlayerAlive(),
+        isLocal: true
+      });
+    }
+    this.remotePlayers.forEach((player) => {
+      if (player.character) {
+        players.push({
+          name: player.character.name,
+          faction: player.character.faction,
+          isAlive: player.isAlive,
+          isLocal: false
+        });
+      }
+    });
+
+    const bots = { Criminal: 0, Enforcer: 0, Civilian: 0 };
+    this.npcs.forEach((npc) => {
+      if (npc.isAlive && bots[npc.faction] !== undefined) bots[npc.faction]++;
+    });
+
+    return { players, bots };
   }
 
   // Shared tracer assets -- one geometry/material for every bullet in the
