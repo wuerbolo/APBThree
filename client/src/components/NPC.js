@@ -45,7 +45,7 @@ export class NPC {
     });
 
     this.healthBar = new THREE.Mesh(healthBarGeometry, healthBarMaterial);
-    this.healthBar.position.y = 2.5; // Position above NPC
+    this.healthBar.position.y = 3.3; // Just above the (doubled-size) head
 
     // Create a container for the health bar that will handle the billboard effect
     this.healthBarContainer = new THREE.Object3D();
@@ -164,7 +164,7 @@ export class NPC {
     const moved = Math.sqrt(dx * dx + dz * dz);
     animateWalk(this.rig, moved);
     if (moved > 0.01) {
-      this.mesh.rotation.y = Math.atan2(dx, dz);
+      this.mesh.rotation.y = Math.atan2(-dx, -dz); // gun/front faces local -Z
     }
 
     // Update health bar to face camera

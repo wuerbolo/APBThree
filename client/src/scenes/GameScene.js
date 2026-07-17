@@ -319,7 +319,7 @@ export class GameScene {
       const z = rand() * (WORLD_SIZE - 10) - (WORLD_HALF - 5);
       if (!isClear(x, z)) continue;
       const tree = treeTemplate.clone();
-      const scale = 0.8 + rand() * 0.6;
+      const scale = 2 * (0.8 + rand() * 0.6); // doubled to match the rest of the scenery
       tree.scale.setScalar(scale);
       tree.position.set(x, 0, z);
       tree.rotation.y = rand() * Math.PI * 2;
@@ -330,12 +330,12 @@ export class GameScene {
     // Bench template: seat, backrest, leg slab
     const benchWood = new THREE.MeshStandardMaterial({ color: 0x8a6642 });
     const benchTemplate = new THREE.Group();
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.12, 0.7), benchWood);
-    seat.position.y = 0.55;
-    const back = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.5, 0.1), benchWood);
-    back.position.set(0, 0.95, -0.3);
-    const legs = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.55, 0.5), new THREE.MeshStandardMaterial({ color: 0x3c3c3c }));
-    legs.position.y = 0.27;
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.24, 1.4), benchWood);
+    seat.position.y = 1.1;
+    const back = new THREE.Mesh(new THREE.BoxGeometry(4.8, 1.0, 0.2), benchWood);
+    back.position.set(0, 1.9, -0.6);
+    const legs = new THREE.Mesh(new THREE.BoxGeometry(4.4, 1.1, 1.0), new THREE.MeshStandardMaterial({ color: 0x3c3c3c }));
+    legs.position.y = 0.54;
     benchTemplate.add(seat, back, legs);
 
     // Four benches around the plaza facing the monument
@@ -355,7 +355,7 @@ export class GameScene {
     // Trash cans near points of interest. (Look the STORE up locally --
     // setupProps runs from the constructor before this.storeBuilding is set.)
     const store = BUILDINGS.find(b => b.label === 'STORE');
-    const trashGeometry = new THREE.CylinderGeometry(0.45, 0.4, 1.1, 8);
+    const trashGeometry = new THREE.CylinderGeometry(0.9, 0.8, 2.2, 8);
     const trashMaterial = new THREE.MeshStandardMaterial({ color: 0x3d5245 });
     const trashSpots = [
       { x: store.x + 8, z: store.z },
@@ -367,13 +367,13 @@ export class GameScene {
     ];
     trashSpots.forEach(spot => {
       const trash = new THREE.Mesh(trashGeometry, trashMaterial);
-      trash.position.set(spot.x, 0.55, spot.z);
+      trash.position.set(spot.x, 1.1, spot.z);
       this.scene.add(trash);
     });
 
     // Holding cell: a ring of vertical bars next to the HQ. Visual only --
     // the server pins jailed entities in place, so no collision needed.
-    const barGeometry = new THREE.CylinderGeometry(0.08, 0.08, 3.4, 6);
+    const barGeometry = new THREE.CylinderGeometry(0.08, 0.08, 6.8, 6);
     const barMaterial = new THREE.MeshStandardMaterial({ color: 0x37474f });
     const half = JAIL.size / 2;
     const barsPerSide = 5;
@@ -381,7 +381,7 @@ export class GameScene {
       const t = -half + (JAIL.size / (barsPerSide - 1)) * i;
       for (const [bx, bz] of [[t, -half], [t, half], [-half, t], [half, t]]) {
         const bar = new THREE.Mesh(barGeometry, barMaterial);
-        bar.position.set(JAIL.x + bx, 1.7, JAIL.z + bz);
+        bar.position.set(JAIL.x + bx, 3.4, JAIL.z + bz);
         this.scene.add(bar);
       }
     }
@@ -389,7 +389,7 @@ export class GameScene {
       new THREE.BoxGeometry(JAIL.size + 0.4, 0.15, JAIL.size + 0.4),
       barMaterial
     );
-    jailRoof.position.set(JAIL.x, 3.4, JAIL.z);
+    jailRoof.position.set(JAIL.x, 6.8, JAIL.z);
     this.scene.add(jailRoof);
 
     // Mission contact NPCs: immortal, static, one per faction, with a
@@ -399,12 +399,12 @@ export class GameScene {
       const rig = buildCharacterMesh(getFactionColor(faction, false));
       rig.group.position.set(spot.x, 1, spot.z);
       // Face the plaza/HQ-ish center of the map
-      rig.group.rotation.y = Math.atan2(-spot.x, -spot.z);
+      rig.group.rotation.y = Math.atan2(spot.x, spot.z);
       this.scene.add(rig.group);
 
       const marker = this.createBuildingLabel('!');
-      marker.scale.set(1.2, 1.6, 1);
-      marker.position.set(spot.x, 3.4, spot.z);
+      marker.scale.set(2.4, 3.2, 1);
+      marker.position.set(spot.x, 4.9, spot.z);
       this.scene.add(marker);
       this.contactMarkers.push(marker);
     }
@@ -537,6 +537,7 @@ export class GameScene {
         if (this.cameraMode === 'topDown' && document.pointerLockElement) {
           document.exitPointerLock();
         }
+        if (this.localPlayer) this.localPlayer.setFirstPersonView(this.cameraMode === 'firstPerson');
       }
       // Weapon switching
       if (WEAPON_KEYS[event.key]) this.equipWeapon(WEAPON_KEYS[event.key]);
@@ -715,16 +716,34 @@ export class GameScene {
     if (now - this.lastShotTime < weapon.cooldown) return;
     this.lastShotTime = now;
 
+    // Fire from the actual gun muzzle, not a rough body-center offset.
+    this.localPlayer.mesh.updateMatrixWorld(true);
+    const origin = new THREE.Vector3();
+    this.localPlayer.gun.getWorldPosition(origin);
+
     let baseDirection;
     if (this.cameraMode === 'firstPerson') {
-      baseDirection = new THREE.Vector3(0, 0, -1);
-      baseDirection.applyQuaternion(this.camera.quaternion);
+      // The gun muzzle sits off to the side of and below the camera (it's
+      // attached to the hand, not the eye), so aiming it straight along the
+      // camera's forward vector makes the tracer visibly miss the crosshair.
+      // Instead, aim at the point the crosshair is actually looking at --
+      // far enough out that any weapon's max range lands well short of it --
+      // and point the muzzle at *that*. This converges the visible shot
+      // onto the crosshair the way real FPS guns do, without needing the
+      // gun rendered exactly at the camera position.
+      const camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+      const aimPoint = this.camera.position.clone().addScaledVector(camForward, 500);
+      baseDirection = aimPoint.sub(origin).normalize();
     } else {
-      baseDirection = new THREE.Vector3(0, -0.5, -1);
-      baseDirection.normalize();
+      // Top-down: no free-look camera to aim with, so shots fire flat and
+      // straight along the character's own facing (same convention as
+      // movement-facing: rotation.y = theta -> world forward
+      // (-sin theta, -cos theta)). No downward tilt -- that was aiming
+      // shots into the ground, cutting their visible range short.
+      const rotY = this.localPlayer.mesh.rotation.y;
+      baseDirection = new THREE.Vector3(-Math.sin(rotY), 0, -Math.cos(rotY));
     }
 
-    const origin = this.localPlayer.mesh.position.clone().add(new THREE.Vector3(0, 1.5, 0));
     const pellets = [];
 
     for (let i = 0; i < weapon.pellets; i++) {
@@ -768,6 +787,7 @@ export class GameScene {
     this.localPlayer = new Player(id, true);
     this.scene.add(this.localPlayer.mesh);
     this.localPlayer.setPosition(position);
+    this.localPlayer.setFirstPersonView(this.cameraMode === 'firstPerson');
   }
 
   addRemotePlayer(id, position, characterData) {
@@ -1033,8 +1053,11 @@ export class GameScene {
         projectile.direction.clone().multiplyScalar(projectile.speed || 1)
       );
 
-      // Check for collisions with players and NPCs
-      const hitRadius = 1; // Collision radius
+      // Check for collisions with players and NPCs. Generous sphere around
+      // the character's origin (roughly hip height) since the doubled-size
+      // model spans well above and below it -- a tight radius would miss
+      // shots that visually land on the chest/head.
+      const hitRadius = 2;
 
       // Check remote players
       this.remotePlayers.forEach((player) => {
@@ -1127,7 +1150,7 @@ export class GameScene {
         this.camera.rotation.y = this.yaw;
         this.camera.rotation.x = this.pitch;
         this.camera.position.copy(this.localPlayer.mesh.position);
-        this.camera.position.y += 2;
+        this.camera.position.y += 2.7; // eye height -- just below the top of the head (local head top is y=2.9)
       } else {
         this.camera.position.set(
           this.localPlayer.mesh.position.x,

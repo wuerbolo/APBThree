@@ -1,9 +1,15 @@
 import * as THREE from 'three';
 
-// Low-poly humanoid replacing the old 2x2x2 box placeholder. The whole
-// figure fits the exact same bounds (-1..+1 on Y around the group origin,
-// ~1.4 wide), so collision radii, spawn heights and the health bar at
-// y=2.5 all keep working unchanged.
+// Low-poly humanoid replacing the old 2x2x2 box placeholder.
+//
+// Every vertical position here is anchored to the feet, which sit at a
+// fixed local y = -1 (so world feet = group.position.y - 1, matching the
+// old placeholder box and every groundY/spawn-y convention elsewhere --
+// nothing outside this file needs to know the model is 2x taller than the
+// original box). To double the model's height while keeping feet pinned
+// at -1, every other point's height *above the feet* doubles: for a point
+// originally at local y = Y (i.e. Y+1 above the feet), the new position is
+// -1 + 2*(Y+1) = 2*Y + 1.
 //
 // Materials: the torso+arms share one per-entity "body" material -- that's
 // the faction-colored (and hit-flashed, and death-grayed) surface. Head
@@ -17,14 +23,14 @@ export function buildCharacterMesh(initialBodyColor) {
   const group = new THREE.Group();
   const bodyMaterial = new THREE.MeshStandardMaterial({ color: initialBodyColor });
 
-  // Torso: 0.9 wide, from y -0.3 to 0.45
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.75, 0.5), bodyMaterial);
-  torso.position.y = 0.075;
+  // Torso: 1.8 wide, from y -0.35 to 1.9
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.5, 1.0), bodyMaterial);
+  torso.position.y = 1.15;
   group.add(torso);
 
-  // Head: 0.45 cube, from y 0.5 to 0.95
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 0.45), headMaterial);
-  head.position.y = 0.725;
+  // Head: 0.9 cube, from y 2.0 to 2.9
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9), headMaterial);
+  head.position.y = 2.45;
   group.add(head);
 
   // Limbs hang from pivot groups at the hip/shoulder so a simple
@@ -37,26 +43,28 @@ export function buildCharacterMesh(initialBodyColor) {
     return pivot;
   };
 
-  // Legs: 0.7 long, pivots at hip height (y -0.3), feet reach y -1
-  const leftLeg = makeLimb(0.28, 0.7, 0.3, legsMaterial);
-  leftLeg.position.set(-0.22, -0.3, 0);
-  const rightLeg = makeLimb(0.28, 0.7, 0.3, legsMaterial);
-  rightLeg.position.set(0.22, -0.3, 0);
+  // Legs: 1.4 long, pivots at hip height (y 0.4), feet reach y -1
+  const leftLeg = makeLimb(0.56, 1.4, 0.6, legsMaterial);
+  leftLeg.position.set(-0.44, 0.4, 0);
+  const rightLeg = makeLimb(0.56, 1.4, 0.6, legsMaterial);
+  rightLeg.position.set(0.44, 0.4, 0);
   group.add(leftLeg, rightLeg);
 
-  // Arms: 0.65 long, pivots at shoulder height (y 0.4), just outside torso
-  const leftArm = makeLimb(0.22, 0.65, 0.28, bodyMaterial);
-  leftArm.position.set(-0.56, 0.4, 0);
-  const rightArm = makeLimb(0.22, 0.65, 0.28, bodyMaterial);
-  rightArm.position.set(0.56, 0.4, 0);
+  // Arms: 1.3 long, pivots at shoulder height (y 1.8), just outside torso
+  const leftArm = makeLimb(0.44, 1.3, 0.56, bodyMaterial);
+  leftArm.position.set(-1.12, 1.8, 0);
+  const rightArm = makeLimb(0.44, 1.3, 0.56, bodyMaterial);
+  rightArm.position.set(1.12, 1.8, 0);
   group.add(leftArm, rightArm);
 
   return {
     group,
     bodyMaterial,
+    torso,
+    head,
     limbs: { leftLeg, rightLeg, leftArm, rightArm },
     // Where cosmetics (hats) attach: top of the head
-    headAnchorY: 0.95
+    headAnchorY: 2.9
   };
 }
 
@@ -97,31 +105,31 @@ export function buildHatMesh(cosmeticId) {
     case 'cap': {
       const hat = new THREE.Group();
       const material = new THREE.MeshStandardMaterial({ color: 0xc62828 });
-      const dome = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.16, 0.5), material);
+      const dome = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.32, 1.0), material);
       hat.add(dome);
-      const brim = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.28), material);
-      brim.position.set(0, -0.055, 0.36);
+      const brim = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.1, 0.56), material);
+      brim.position.set(0, -0.11, 0.72);
       hat.add(brim);
       return hat;
     }
     case 'tophat': {
       const hat = new THREE.Group();
       const material = new THREE.MeshStandardMaterial({ color: 0x1b1b1b });
-      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.42, 10), material);
-      crown.position.y = 0.24;
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.84, 10), material);
+      crown.position.y = 0.48;
       hat.add(crown);
-      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.04, 10), material);
-      brim.position.y = 0.02;
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.72, 0.08, 10), material);
+      brim.position.y = 0.04;
       hat.add(brim);
       return hat;
     }
     case 'halo': {
       const halo = new THREE.Mesh(
-        new THREE.TorusGeometry(0.28, 0.045, 6, 16),
+        new THREE.TorusGeometry(0.56, 0.09, 6, 16),
         new THREE.MeshBasicMaterial({ color: 0xffd700 })
       );
       halo.rotation.x = Math.PI / 2;
-      halo.position.y = 0.35;
+      halo.position.y = 0.7;
       return halo;
     }
     default:
