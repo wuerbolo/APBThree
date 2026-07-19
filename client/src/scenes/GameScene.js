@@ -81,7 +81,7 @@ export class GameScene {
     // Setup systems
     this.network = new NetworkSystem(this);
     this.hud = new HUD(this);
-    
+
     // Setup event listeners
     this.setupEventListeners();
     this.initNetworkHandlers();
@@ -576,6 +576,14 @@ export class GameScene {
         event.preventDefault();
         this.hud.showRoster(this.buildRoster());
       }
+      // Controls help
+      if (event.key === 'h' || event.key === 'H') {
+        if (this.hud.isHelpOpen()) {
+          this.hud.hideHelp();
+        } else {
+          this.hud.showHelp();
+        }
+      }
     });
 
     window.addEventListener('keyup', (event) => {
@@ -588,6 +596,9 @@ export class GameScene {
       }
       if (event.key === 'Escape' && this.hud.isFactionChangeMenuOpen()) {
         this.hud.closeFactionChangeMenu();
+      }
+      if (event.key === 'Escape' && this.hud.isHelpOpen()) {
+        this.hud.hideHelp();
       }
     });
 

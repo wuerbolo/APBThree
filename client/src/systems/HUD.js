@@ -370,6 +370,7 @@ export class HUD {
             <div>Money: $<span id="stat-money">${character.money}</span></div>
             <div>Weapon: <span id="stat-weapon">${this.gameScene.currentWeapon}</span> <span style="opacity:0.6">(1-4 to switch)</span></div>
             <div>Wanted: <span id="stat-wanted">—</span></div>
+            <div style="opacity:0.6; margin-top: 4px; font-size: 12px;">Press <b>H</b> for controls</div>
         `;
     }
 
@@ -553,6 +554,103 @@ export class HUD {
                 this.renderLeaderboard();
             };
             tabRow.appendChild(tab);
+        }
+    }
+
+    // "H" key: full controls reference. A first-time player has no other
+    // way to discover half of these (E/F/G/N/Tab aren't hinted anywhere
+    // on screen), so keep this in sync whenever a new key binding is added.
+    isHelpOpen() {
+        return !!document.getElementById('help-overlay');
+    }
+
+    showHelp() {
+        if (this.isHelpOpen()) return;
+        if (document.pointerLockElement) document.exitPointerLock();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'help-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.85);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1300;
+            font-family: Arial, sans-serif;
+        `;
+
+        const panel = document.createElement('div');
+        panel.style.cssText = `
+            background-color: rgba(20, 20, 20, 0.95);
+            color: white;
+            padding: 30px 40px;
+            border-radius: 8px;
+            border: 2px solid #666;
+            min-width: 420px;
+            max-width: 90vw;
+        `;
+
+        const row = (keys, desc) => `
+            <div style="display:flex; justify-content:space-between; gap:24px; padding:4px 0;">
+                <span style="color:#ffb74d; font-weight:bold; white-space:nowrap;">${keys}</span>
+                <span style="opacity:0.85; text-align:right;">${desc}</span>
+            </div>
+        `;
+
+        const section = (title, rows) => `
+            <div style="margin-top:16px;">
+                <div style="font-size:13px; font-weight:bold; opacity:0.6; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">${title}</div>
+                ${rows}
+            </div>
+        `;
+
+        panel.innerHTML = `
+            <div style="font-size:26px; font-weight:bold; margin-bottom:4px;">Controls</div>
+            <div style="opacity:0.6; font-size:13px;">Press H or Esc to close</div>
+            ${section('Movement', [
+                row('WASD / Arrows', 'Move'),
+                row('Space', 'Jump')
+            ].join(''))}
+            ${section('Camera', [
+                row('V', 'Toggle first-person / top-down'),
+                row('Mouse', 'Look around (first-person)'),
+                row('Scroll', 'Zoom (top-down)'),
+                row('Right-click', 'Aim down sights (sniper)')
+            ].join(''))}
+            ${section('Combat', [
+                row('Left-click', 'Shoot (hold for SMG auto-fire)'),
+                row('1 / 2 / 3 / 4', 'Pistol / Shotgun / SMG / Sniper')
+            ].join(''))}
+            ${section('Interaction', [
+                row('E', 'Open/close the shop (near STORE)'),
+                row('F', 'Talk to contact / revive / arrest'),
+                row('M', 'Accept a pending mission'),
+                row('G', 'Dance emote')
+            ].join(''))}
+            ${section('Social', [
+                row('N', 'Switch faction'),
+                row('Tab (hold)', 'Show online roster'),
+                row('H', 'Toggle this help')
+            ].join(''))}
+        `;
+
+        overlay.appendChild(panel);
+        overlay.onclick = (event) => {
+            if (event.target === overlay) this.hideHelp();
+        };
+        document.body.appendChild(overlay);
+    }
+
+    hideHelp() {
+        const overlay = document.getElementById('help-overlay');
+        if (overlay) overlay.remove();
+        if (this.gameScene && this.gameScene.cameraMode === 'firstPerson') {
+            this.gameScene.renderer.domElement.requestPointerLock();
         }
     }
 
