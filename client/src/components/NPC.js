@@ -17,6 +17,65 @@ export class NPC {
 
     // Create health bar
     this.createHealthBar();
+
+    // Faction melee weapon in the right hand (baton/knife)
+    this.meleeWeapon = null;
+    this.equipMeleeWeapon();
+  }
+
+  // Enforcers carry a baton, Outlaws a knife, Civilians nothing. The
+  // weapon is a child of the right-arm pivot so it swings naturally with
+  // the walk cycle and with the melee attack animation.
+  equipMeleeWeapon() {
+    if (this.meleeWeapon) {
+      this.rig.limbs.rightArm.remove(this.meleeWeapon);
+      this.meleeWeapon = null;
+    }
+
+    let weapon = null;
+    if (this.faction === 'Enforcer') {
+      // Baton: black shaft with a short grip
+      weapon = new THREE.Group();
+      const shaft = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.07, 0.07, 0.95, 8),
+        new THREE.MeshStandardMaterial({ color: 0x1a1a1a })
+      );
+      shaft.position.y = -0.3;
+      const grip = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.09, 0.09, 0.22, 8),
+        new THREE.MeshStandardMaterial({ color: 0x424242 })
+      );
+      grip.position.y = 0.28;
+      weapon.add(shaft, grip);
+      weapon.rotation.x = 0.5; // angled forward-down, patrol style
+    } else if (this.faction === 'Criminal') {
+      // Knife: silver blade pointing forward out of a dark handle
+      weapon = new THREE.Group();
+      const blade = new THREE.Mesh(
+        new THREE.BoxGeometry(0.05, 0.12, 0.5),
+        new THREE.MeshStandardMaterial({ color: 0xcfd8dc, metalness: 0.6, roughness: 0.3 })
+      );
+      blade.position.z = -0.34;
+      const handle = new THREE.Mesh(
+        new THREE.BoxGeometry(0.08, 0.14, 0.2),
+        new THREE.MeshStandardMaterial({ color: 0x3e2723 })
+      );
+      weapon.add(blade, handle);
+    }
+
+    if (weapon) {
+      // Right-arm pivot hangs the arm down its local -y; the hand sits at
+      // roughly -1.2 (arm length 1.3)
+      weapon.position.set(0, -1.2, -0.05);
+      this.rig.limbs.rightArm.add(weapon);
+      this.meleeWeapon = weapon;
+    }
+  }
+
+  // Server says this NPC just landed a melee hit -- play a quick
+  // raise-and-strike swing with the weapon arm.
+  triggerMeleeSwing() {
+    this._swingStart = performance.now();
   }
 
   // Return the color for this NPC's faction
@@ -144,6 +203,7 @@ export class NPC {
         this.setBodyColorHex(this.getFactionColor());
       }
       this.updateHealthBar();
+      this.equipMeleeWeapon();
     }
   }
 
@@ -183,6 +243,18 @@ export class NPC {
     animateWalk(this.rig, moved);
     if (moved > 0.01) {
       this.mesh.rotation.y = Math.atan2(-dx, -dz); // gun/front faces local -Z
+    }
+
+    // Melee swing overrides the weapon arm's walk pose: raise forward and
+    // strike, back to rest over ~350ms (positive rotation.x swings the
+    // hanging arm toward local -Z, i.e. at whoever the NPC is facing)
+    if (this._swingStart) {
+      const t = (performance.now() - this._swingStart) / 350;
+      if (t >= 1) {
+        this._swingStart = null;
+      } else {
+        this.rig.limbs.rightArm.rotation.x = Math.sin(t * Math.PI) * 2.1;
+      }
     }
 
     // Update health bar to face camera

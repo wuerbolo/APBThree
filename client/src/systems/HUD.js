@@ -19,36 +19,62 @@ export class HUD {
         style.textContent = `
             @keyframes bolo-letter-drop {
                 0% { transform: translateY(-140vh); }
-                60% { transform: translateY(0); }
-                75% { transform: translateY(-28px); }
-                88% { transform: translateY(0); }
-                95% { transform: translateY(-9px); }
-                100% { transform: translateY(0); }
+                60% { transform: translateY(0) scaleY(1); }
+                68% { transform: translateY(0) scaleY(0.88); }
+                78% { transform: translateY(-26px) scaleY(1.04); }
+                88% { transform: translateY(0) scaleY(0.96); }
+                100% { transform: translateY(0) scaleY(1); }
             }
             @keyframes bolo-letter-bob {
-                0%, 100% { transform: translateY(0) rotate(-1.2deg); }
-                50% { transform: translateY(-7px) rotate(1.2deg); }
+                0%, 100% { transform: translateY(0) rotate(-1.6deg); }
+                50% { transform: translateY(-8px) rotate(1.6deg); }
             }
             @keyframes bolo-splash-pulse {
                 0%, 100% { transform: rotate(-12deg) scale(1); }
                 50% { transform: rotate(-12deg) scale(1.13); }
             }
-            @keyframes bolo-lights {
-                0%, 100% { background-position: 0% 50%; }
-                50% { background-position: 100% 50%; }
+            @keyframes bolo-siren-red {
+                0%, 45%, 100% { opacity: 0.06; }
+                18% { opacity: 0.32; }
+            }
+            @keyframes bolo-siren-blue {
+                0%, 55%, 100% { opacity: 0.06; }
+                72% { opacity: 0.32; }
             }
             @keyframes bolo-fade-up {
                 from { opacity: 0; transform: translateY(24px); }
                 to { opacity: 1; transform: translateY(0); }
             }
+            /* Outer slot: each letter's own comic tilt/offset (static).
+               Inner letter: drop-in + idle bob animations. Split in two
+               because the animation's transform would stomp the tilt. */
+            #title-screen .bolo-slot {
+                display: inline-block;
+            }
             #title-screen .bolo-letter {
                 display: inline-block;
+                transform-origin: 50% 90%;
                 animation: bolo-letter-drop 1.1s cubic-bezier(0.22, 1, 0.36, 1) both,
                            bolo-letter-bob 2.6s ease-in-out infinite;
             }
+            #title-screen .bolo-glyph {
+                background: linear-gradient(180deg, #ffffff 30%, #dfe7ee 55%, #9fb3c8 100%);
+                -webkit-background-clip: text;
+                background-clip: text;
+                -webkit-text-fill-color: transparent;
+                -webkit-text-stroke: 0.045em #101418;
+                filter: drop-shadow(0.045em 0.06em 0 #101418)
+                        drop-shadow(0 0.02em 0.12em rgba(0, 0, 0, 0.65));
+            }
             #title-screen .bolo-dot {
                 display: inline-block;
-                color: #ffb300;
+                width: 0.16em;
+                height: 0.16em;
+                margin: 0 0.05em;
+                border-radius: 50%;
+                background: radial-gradient(circle at 35% 30%, #ffe082, #ffb300 55%, #e65100 100%);
+                box-shadow: 0.03em 0.045em 0 #101418, inset -0.02em -0.03em 0.02em rgba(0,0,0,0.35);
+                border: 0.035em solid #101418;
                 animation: bolo-fade-up 0.5s ease-out both;
             }
         `;
@@ -69,39 +95,75 @@ export class HUD {
             z-index: 2000;
             font-family: Arial, sans-serif;
             background:
-                radial-gradient(circle at 50% 120%, rgba(0,0,0,0.35), rgba(0,0,0,0.92) 70%),
-                linear-gradient(115deg, #3b0d0d, #10101c 35%, #0d1f3b 65%, #10101c);
-            background-size: 100% 100%, 300% 300%;
-            animation: bolo-lights 7s ease-in-out infinite;
+                radial-gradient(circle at 50% 115%, rgba(30, 34, 44, 0.4), rgba(6, 7, 10, 0.95) 72%),
+                linear-gradient(180deg, #101420, #0a0c12);
             overflow: hidden;
         `;
 
-        // B . O . L . O -- letters drop in one by one, dots fade in after
+        // Siren lightbar: a soft red glow on the left and blue on the right,
+        // alternating like a patrol car parked just off-screen. Kept low
+        // opacity so it reads as ambience, not a rave.
+        const sirenRed = document.createElement('div');
+        sirenRed.style.cssText = `
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(ellipse 60% 80% at 12% 40%, rgba(244, 30, 30, 0.85), transparent 65%);
+            animation: bolo-siren-red 2.6s ease-in-out infinite;
+            pointer-events: none;
+        `;
+        const sirenBlue = document.createElement('div');
+        sirenBlue.style.cssText = `
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(ellipse 60% 80% at 88% 40%, rgba(41, 98, 255, 0.85), transparent 65%);
+            animation: bolo-siren-blue 2.6s ease-in-out infinite;
+            pointer-events: none;
+        `;
+        overlay.appendChild(sirenRed);
+        overlay.appendChild(sirenBlue);
+
+        // B . O . L . O -- chunky comic lettering (PureBDcraft-style): heavy
+        // condensed glyphs with a thick ink outline, white cel-shaded fill,
+        // and every letter sitting at its own jaunty angle. Letters drop in
+        // one by one with a squash on landing; dots pop in after.
         const logo = document.createElement('div');
         logo.style.cssText = `
-            font-size: clamp(72px, 16vw, 170px);
+            font-size: clamp(96px, 21vw, 230px);
+            font-family: 'Impact', 'Haettenschweiler', 'Arial Black', sans-serif;
             font-weight: 900;
-            color: #f5f5f5;
-            letter-spacing: 0.04em;
+            letter-spacing: 0.02em;
             line-height: 1;
-            text-shadow:
-                3px 3px 0 #8a8a8a, 6px 6px 0 #5c5c5c, 9px 9px 0 #333,
-                12px 12px 22px rgba(0, 0, 0, 0.9);
+            transform: skewX(-5deg);
             user-select: none;
+            position: relative;
         `;
-        const parts = ['B', '.', 'O', '.', 'L', '.', 'O'];
-        parts.forEach((ch, i) => {
-            const span = document.createElement('span');
-            span.textContent = ch;
+        // [char, tilt deg, y-offset em] -- the irregular comic baseline
+        const parts = [
+            ['B', -5, 0.02], ['.', 0, 0], ['O', 3.5, -0.045], ['.', 0, 0],
+            ['L', -3, 0.035], ['.', 0, 0], ['O', 5, -0.02]
+        ];
+        parts.forEach(([ch, tilt, offsetY], i) => {
             if (ch === '.') {
-                span.className = 'bolo-dot';
-                span.style.animationDelay = `${1.0 + i * 0.08}s`;
-            } else {
-                span.className = 'bolo-letter';
-                // Stagger the drop; desync the idle bob so it doesn't march in unison
-                span.style.animationDelay = `${i * 0.14}s, ${1.4 + i * 0.33}s`;
+                // Round gold "bullet" dots instead of typographic periods
+                const dot = document.createElement('span');
+                dot.className = 'bolo-dot';
+                dot.style.animationDelay = `${1.0 + i * 0.08}s`;
+                logo.appendChild(dot);
+                return;
             }
-            logo.appendChild(span);
+            const slot = document.createElement('span');
+            slot.className = 'bolo-slot';
+            slot.style.transform = `rotate(${tilt}deg) translateY(${offsetY}em)`;
+            const letter = document.createElement('span');
+            letter.className = 'bolo-letter';
+            // Stagger the drop; desync the idle bob so it doesn't march in unison
+            letter.style.animationDelay = `${i * 0.14}s, ${1.4 + i * 0.33}s`;
+            const glyph = document.createElement('span');
+            glyph.className = 'bolo-glyph';
+            glyph.textContent = ch;
+            letter.appendChild(glyph);
+            slot.appendChild(letter);
+            logo.appendChild(slot);
         });
 
         // Pulsing yellow splash, Minecraft-style, hanging off the logo's corner
@@ -743,6 +805,39 @@ export class HUD {
             };
             tabRow.appendChild(tab);
         }
+    }
+
+    // Brief "HEADSHOT x3" popup above the crosshair when one of your shots
+    // lands on a head.
+    showHeadshotMarker() {
+        let marker = document.getElementById('headshot-marker');
+        if (!marker) {
+            marker = document.createElement('div');
+            marker.id = 'headshot-marker';
+            marker.textContent = 'HEADSHOT x3';
+            marker.style.cssText = `
+                position: fixed;
+                top: 42%;
+                left: 50%;
+                transform: translateX(-50%);
+                color: #ffb300;
+                font-family: Arial, sans-serif;
+                font-size: 20px;
+                font-weight: bold;
+                text-shadow: 2px 2px 3px rgba(0, 0, 0, 0.8);
+                z-index: 900;
+                pointer-events: none;
+                transition: opacity 0.4s ease-out;
+                opacity: 0;
+            `;
+            document.body.appendChild(marker);
+        }
+        marker.style.opacity = '1';
+        void marker.offsetWidth; // restart the fade even if one is mid-flight
+        clearTimeout(this._headshotTimer);
+        this._headshotTimer = setTimeout(() => {
+            marker.style.opacity = '0';
+        }, 350);
     }
 
     // "H" key: full controls reference. A first-time player has no other

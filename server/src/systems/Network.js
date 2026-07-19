@@ -638,8 +638,12 @@ export class NetworkSystem {
         }
         budget.remaining--;
 
-        // Authoritative damage -- the client's claimed amount is ignored
-        const amount = stats.damage;
+        // Authoritative damage -- the client's claimed amount is ignored.
+        // Headshots deal triple: the hit *location* is client-reported (the
+        // server doesn't track aim), but the multiplier, budget, range and
+        // ownership all stay server-side, so the worst a doctored client
+        // gets is 3x -- same as an actual headshot.
+        const amount = data.isHeadshot ? stats.damage * 3 : stats.damage;
 
         // Range check against the server's own positions, not anything
         // the client asserts about where the shot came from.
@@ -1071,6 +1075,9 @@ export class NetworkSystem {
     targetPlayer.takeDamage(amount);
     const targetFaction = targetPlayer.hasCharacter() ? targetPlayer.getCharacter().faction : null;
 
+    // Clients animate the attacker's melee swing (baton/knife) off this
+    this.io.emit('npcSwing', { id: npcId });
+
     console.log(`Player ${targetId} (${targetFaction}) took ${amount} damage from NPC ${npcId}. Health: ${targetPlayer.health}`);
 
     this.io.emit('updateHealth', {
@@ -1107,6 +1114,8 @@ export class NetworkSystem {
     if (!targetNpc || !targetNpc.isAlive) return;
 
     targetNpc.takeDamage(amount);
+
+    this.io.emit('npcSwing', { id: attackerId });
 
     console.log(`NPC ${targetNpcId} (${targetNpc.faction}) took ${amount} damage from NPC ${attackerId}. Health: ${targetNpc.health}`);
 

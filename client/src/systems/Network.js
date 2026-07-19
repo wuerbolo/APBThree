@@ -216,6 +216,12 @@ export class NetworkSystem {
       this.gameScene.updateNPC(id, position);
     });
 
+    // An NPC landed a melee hit -- swing their baton/knife
+    this.socket.on('npcSwing', ({ id }) => {
+      const npc = this.gameScene.npcs.get(id);
+      if (npc) npc.triggerMeleeSwing();
+    });
+
     this.socket.on('removeNPC', (id) => {
       console.log(`Removing NPC ${id} from scene`);
       const npc = this.gameScene.npcs.get(id);
@@ -240,6 +246,11 @@ export class NetworkSystem {
       // Old single-projectile format kept as a fallback.
       const pellets = data.pellets || [{ id: data.id, position: data.position, direction: data.direction }];
       pellets.forEach(p => this.gameScene.handleRemoteShot(p.id, p.position, p.direction, data.weapon));
+
+      // Muzzle flash + gun kick on the shooter, so shots read as coming
+      // from their weapon and not just materializing mid-air.
+      const shooter = this.gameScene.remotePlayers.get(data.playerId);
+      if (shooter) shooter.triggerGunRecoil(1);
     });
 
     this.socket.on('leaderboard', (rankings) => {

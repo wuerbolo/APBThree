@@ -71,6 +71,13 @@ export class GameScene {
     this.yaw = 0;
     this.pitch = 0;
     this.mouseSensitivity = 0.002;
+    // Visual-only recoil flick applied on top of yaw/pitch; decays per frame
+    this.recoilPitch = 0;
+    this.recoilYaw = 0;
+    // Rapid-fire spread penalty (see tryShoot); drains back to zero per frame
+    this.fireBloom = 0;
+    // Viewmodel kick-back spring; decays in updateViewmodel
+    this.viewmodelKick = 0;
     
     // Constants
     this.TOPDOWN_HEIGHT = 20; // was 50 -- way too far out to make anything out
@@ -173,10 +180,46 @@ export class GameScene {
 
     this.camera.add(pistol, shotgun, smg, sniper);
     this.viewmodels = { pistol, shotgun, smg, sniper };
+
+    // Per-model rest pose (recoil animates offsets from it) and a muzzle
+    // flash at each barrel tip.
+    const flashMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffc94d,
+      transparent: true,
+      opacity: 0.95,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    const muzzleZ = { pistol: -0.55, shotgun: -0.9, smg: -0.5, sniper: -1.2 };
+    for (const [weaponId, model] of Object.entries(this.viewmodels)) {
+      model.userData.restPosition = model.position.clone();
+      const flash = new THREE.Group();
+      const quadA = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.22), flashMaterial);
+      const quadB = quadA.clone();
+      quadB.rotation.z = Math.PI / 4;
+      flash.add(quadA, quadB);
+      flash.position.set(0, 0.05, muzzleZ[weaponId]);
+      flash.visible = false;
+      model.add(flash);
+      model.userData.flash = flash;
+    }
+  }
+
+  // Kick the first-person weapon back/up and light its muzzle flash.
+  triggerViewmodelKick(strength = 1) {
+    this.viewmodelKick = Math.min(this.viewmodelKick + strength, 2.5);
+    const model = this.viewmodels[this.currentWeapon];
+    if (model && model.visible && model.userData.flash) {
+      const flash = model.userData.flash;
+      flash.visible = true;
+      flash.rotation.z = Math.random() * Math.PI;
+      clearTimeout(this._viewmodelFlashTimer);
+      this._viewmodelFlashTimer = setTimeout(() => { flash.visible = false; }, 55);
+    }
   }
 
   // Keep the viewmodel/crosshair in sync with camera mode, equipped weapon
-  // and alive state. Called every frame; cheap (just visibility flags).
+  // and alive state, and run the recoil kick-back spring. Called every frame.
   updateViewmodel() {
     const inFirstPerson = this.cameraMode === 'firstPerson'
       && this.isLocalPlayerAlive()
@@ -184,7 +227,21 @@ export class GameScene {
     for (const [weaponId, model] of Object.entries(this.viewmodels)) {
       // Hide the viewmodel while zoomed -- it blocks the scoped view
       model.visible = inFirstPerson && !this.zoomed && this.currentWeapon === weaponId;
+
+      // Recoil: slide back toward the shoulder, muzzle tips up, then spring
+      // back to the rest pose.
+      const rest = model.userData.restPosition;
+      model.position.z = rest.z + this.viewmodelKick * 0.14;
+      model.position.y = rest.y + this.viewmodelKick * 0.025;
+      model.rotation.x = this.viewmodelKick * 0.13;
     }
+    this.viewmodelKick *= 0.75;
+    if (this.viewmodelKick < 0.01) this.viewmodelKick = 0;
+
+    // Bloom drains while you hold fire discipline
+    this.fireBloom *= 0.90;
+    if (this.fireBloom < 0.001) this.fireBloom = 0;
+
     this.hud.setCrosshairVisible(inFirstPerson);
   }
 
@@ -779,42 +836,51 @@ export class GameScene {
     if (now - this.lastShotTime < weapon.cooldown) return;
     this.lastShotTime = now;
 
-    // Fire from the actual gun muzzle, not a rough body-center offset.
-    this.localPlayer.mesh.updateMatrixWorld(true);
-    const origin = new THREE.Vector3();
-    this.localPlayer.gun.getWorldPosition(origin);
-
+    let origin;
     let baseDirection;
     if (this.cameraMode === 'firstPerson') {
-      // The gun muzzle sits off to the side of and below the camera (it's
-      // attached to the hand, not the eye), so aiming it straight along the
-      // camera's forward vector makes the tracer visibly miss the crosshair.
-      // Instead, aim at the point the crosshair is actually looking at --
-      // far enough out that any weapon's max range lands well short of it --
-      // and point the muzzle at *that*. This converges the visible shot
-      // onto the crosshair the way real FPS guns do, without needing the
-      // gun rendered exactly at the camera position.
+      // The third-person gun hangs ~1.5 right and ~2 below the eye; a tracer
+      // spawned there carries almost all of that offset at real combat
+      // distances, which reads as shots landing down-right of the crosshair.
+      // Standard FPS trick instead: spawn from a "viewmodel muzzle" just
+      // below-right of the camera, and converge onto the crosshair's
+      // sightline at typical engagement range. The residual error is a
+      // fraction of the ~0.6-unit muzzle offset -- invisible in practice.
       const camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
-      const aimPoint = this.camera.position.clone().addScaledVector(camForward, 500);
+      const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+      const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+      origin = this.camera.position.clone()
+        .addScaledVector(camRight, 0.45)
+        .addScaledVector(camUp, -0.4)
+        .addScaledVector(camForward, 1.0);
+      const CONVERGENCE_DISTANCE = 60;
+      const aimPoint = this.camera.position.clone().addScaledVector(camForward, CONVERGENCE_DISTANCE);
       baseDirection = aimPoint.sub(origin).normalize();
     } else {
       // Top-down: no free-look camera to aim with, so shots fire flat and
       // straight along the character's own facing (same convention as
       // movement-facing: rotation.y = theta -> world forward
-      // (-sin theta, -cos theta)). No downward tilt -- that was aiming
-      // shots into the ground, cutting their visible range short.
+      // (-sin theta, -cos theta)), from the actual gun muzzle. No downward
+      // tilt -- that was aiming shots into the ground, cutting range short.
+      this.localPlayer.mesh.updateMatrixWorld(true);
+      origin = new THREE.Vector3();
+      this.localPlayer.gun.getWorldPosition(origin);
       const rotY = this.localPlayer.mesh.rotation.y;
       baseDirection = new THREE.Vector3(-Math.sin(rotY), 0, -Math.cos(rotY));
     }
 
     const pellets = [];
 
+    // Base weapon spread widened by accumulated bloom from rapid fire
+    // (first person only -- top-down has no crosshair to drift from)
+    const spread = weapon.spread + (this.cameraMode === 'firstPerson' ? this.fireBloom : 0);
+
     for (let i = 0; i < weapon.pellets; i++) {
       const direction = baseDirection.clone();
-      if (weapon.spread > 0) {
-        direction.x += (Math.random() - 0.5) * weapon.spread * 2;
-        direction.y += (Math.random() - 0.5) * weapon.spread * 2;
-        direction.z += (Math.random() - 0.5) * weapon.spread * 2;
+      if (spread > 0) {
+        direction.x += (Math.random() - 0.5) * spread * 2;
+        direction.y += (Math.random() - 0.5) * spread * 2;
+        direction.z += (Math.random() - 0.5) * spread * 2;
         direction.normalize();
       }
 
@@ -842,6 +908,21 @@ export class GameScene {
       sniper: sound.shootSniper
     };
     (shotSounds[this.currentWeapon] || sound.shootPistol)();
+
+    // Weapon kick: viewmodel recoil + muzzle flash, plus a camera flick in
+    // first person that decays back in the render loop.
+    const RECOIL_KICK = { pistol: 1.0, shotgun: 1.8, smg: 0.5, sniper: 2.4 };
+    const kick = RECOIL_KICK[this.currentWeapon] || 1.0;
+    this.localPlayer.triggerGunRecoil(kick);
+    this.triggerViewmodelKick(kick);
+    if (this.cameraMode === 'firstPerson') {
+      this.recoilPitch += 0.005 * kick;
+      this.recoilYaw += (Math.random() - 0.5) * 0.0035 * kick;
+      // Firing again before the recoil settles widens the next shot's
+      // spread (bloom); it drains back to zero in the render loop.
+      const BLOOM_ADD = { pistol: 0.028, shotgun: 0.02, smg: 0.011, sniper: 0.07 };
+      this.fireBloom = Math.min(0.09, this.fireBloom + (BLOOM_ADD[this.currentWeapon] || 0.02));
+    }
 
     this.network.sendShot({ weapon: this.currentWeapon, pellets });
   }
@@ -1091,8 +1172,12 @@ export class GameScene {
     this.npcs.forEach(npc => npc.update(this.camera));
 
     // Characters rotate to face their movement direction now, so remote
-    // players' health bars need re-billboarding every frame too.
-    this.remotePlayers.forEach(player => player.updateHealthBarRotation(this.camera));
+    // players' health bars need re-billboarding every frame too, and their
+    // gun recoil springs need decaying.
+    this.remotePlayers.forEach(player => {
+      player.updateHealthBarRotation(this.camera);
+      player.updateGunRecoil();
+    });
 
     // Update projectiles
     const now = Date.now();
@@ -1111,29 +1196,60 @@ export class GameScene {
         return;
       }
 
-      // Move projectile (sniper rounds travel faster)
+      // Move projectile (sniper rounds travel faster), remembering where it
+      // was -- fast rounds can cross a whole hitbox between frames, so hit
+      // tests run against the swept segment, not just the end point.
+      const prevPosition = projectile.position.clone();
       projectile.position.add(
         projectile.direction.clone().multiplyScalar(projectile.speed || 1)
       );
 
-      // Check for collisions with players and NPCs. Generous sphere around
-      // the character's origin (roughly hip height) since the doubled-size
-      // model spans well above and below it -- a tight radius would miss
-      // shots that visually land on the chest/head.
-      const hitRadius = 2;
+      // Two hit zones per character: a generous body sphere around the
+      // origin (hip height, spans the doubled-size model), and a tighter
+      // head sphere. The head (world y ~3.0-3.9) pokes *out* of the body
+      // sphere (tops out at y=3) -- checking only the body sphere is why
+      // headshots never registered.
+      const bodyRadius = 2;
+      const HEAD_OFFSET_Y = 2.45; // rig head center above the mesh origin
+      const headRadius = 0.85;
+
+      // Distance from point p to the segment [a, b] the projectile just swept
+      const segmentDistanceTo = (p, a, b) => {
+        const ab = b.clone().sub(a);
+        const lengthSq = ab.lengthSq();
+        const t = lengthSq === 0 ? 0 : Math.max(0, Math.min(1,
+          p.clone().sub(a).dot(ab) / lengthSq));
+        return a.clone().addScaledVector(ab, t).distanceTo(p);
+      };
+
+      const testHit = (mesh) => {
+        const headCenter = mesh.position.clone();
+        headCenter.y += HEAD_OFFSET_Y;
+        if (segmentDistanceTo(headCenter, prevPosition, projectile.position) < headRadius) {
+          return { hit: true, headshot: true };
+        }
+        if (segmentDistanceTo(mesh.position, prevPosition, projectile.position) < bodyRadius) {
+          return { hit: true, headshot: false };
+        }
+        return { hit: false };
+      };
 
       // Check remote players
       this.remotePlayers.forEach((player) => {
-        if (player.isAlive && projectile.position.distanceTo(player.mesh.position) < hitRadius) {
-          // Only the shooter's own projectiles report damage -- otherwise
-          // every observing client would double-report the same hit.
+        if (!player.isAlive) return;
+        const result = testHit(player.mesh);
+        if (result.hit) {
+          // Only the shooter's client reports damage for its own projectiles;
+          // observers just render them.
           if (projectile.isLocal) {
             this.network.sendDamage({
               targetId: player.id,
               amount: projectile.damage || 10,
               isNPC: false,
-              weapon: projectile.weapon
+              weapon: projectile.weapon,
+              isHeadshot: result.headshot
             });
+            if (result.headshot) this.hud.showHeadshotMarker();
           }
 
           // Visual feedback -- revert to the *computed* faction color rather
@@ -1144,7 +1260,7 @@ export class GameScene {
           // target would get stuck flashed. A single timer per target also
           // avoids a pile of pending reverts firing out of order.
           clearTimeout(player._hitFlashTimer);
-          player.setBodyColorHex(0xffff00);
+          player.setBodyColorHex(result.headshot ? 0xffffff : 0xffff00);
           player._hitFlashTimer = setTimeout(() => {
             player.setBodyColorHex(player.isAlive ? player.getFactionColor() : DEAD_COLOR);
           }, 100);
@@ -1157,19 +1273,23 @@ export class GameScene {
 
       // Check NPCs
       this.npcs.forEach((npc) => {
-        if (npc.isAlive && projectile.position.distanceTo(npc.mesh.position) < hitRadius) {
+        if (!npc.isAlive) return;
+        const result = testHit(npc.mesh);
+        if (result.hit) {
           if (projectile.isLocal) {
             this.network.sendDamage({
               targetId: npc.id,
               amount: projectile.damage || 10,
               isNPC: true,
-              weapon: projectile.weapon
+              weapon: projectile.weapon,
+              isHeadshot: result.headshot
             });
+            if (result.headshot) this.hud.showHeadshotMarker();
           }
 
           // Visual feedback (see comment on the player branch above)
           clearTimeout(npc._hitFlashTimer);
-          npc.setBodyColorHex(0xff0000);
+          npc.setBodyColorHex(result.headshot ? 0xffffff : 0xff0000);
           npc._hitFlashTimer = setTimeout(() => {
             npc.setBodyColorHex(npc.isAlive ? npc.getFactionColor() : DEAD_COLOR);
           }, 100);
@@ -1210,8 +1330,8 @@ export class GameScene {
     if (this.localPlayer) {
       if (this.cameraMode === 'firstPerson') {
         this.camera.rotation.order = 'YXZ';
-        this.camera.rotation.y = this.yaw;
-        this.camera.rotation.x = this.pitch;
+        this.camera.rotation.y = this.yaw + this.recoilYaw;
+        this.camera.rotation.x = this.pitch + this.recoilPitch;
         this.camera.position.copy(this.localPlayer.mesh.position);
         this.camera.position.y += 2.7; // eye height -- just below the top of the head (local head top is y=2.9)
       } else {
@@ -1222,6 +1342,12 @@ export class GameScene {
         );
         this.camera.rotation.set(this.TOPDOWN_ANGLE, 0, 0);
       }
+
+      // Recoil flick springs back to rest over a few frames
+      this.recoilPitch *= 0.82;
+      this.recoilYaw *= 0.82;
+      if (Math.abs(this.recoilPitch) < 0.0004) this.recoilPitch = 0;
+      if (Math.abs(this.recoilYaw) < 0.0004) this.recoilYaw = 0;
 
       // Hit shake -- decaying random jitter for the remainder of SHAKE_DURATION
       const shakeRemaining = this.shakeUntil - Date.now();

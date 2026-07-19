@@ -57,12 +57,64 @@ export class Player {
     barrel.position.z = -0.8;
     gunGroup.add(barrel);
 
+    // Muzzle flash: two crossed bright quads at the barrel tip, shown for a
+    // few frames per shot. Shared by first- and third-person views.
+    const flashMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffc94d,
+      transparent: true,
+      opacity: 0.95,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    const flash = new THREE.Group();
+    const quadA = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.55), flashMaterial);
+    const quadB = quadA.clone();
+    quadB.rotation.z = Math.PI / 4;
+    flash.add(quadA, quadB);
+    flash.position.z = -1.35;
+    flash.visible = false;
+    gunGroup.add(flash);
+    this.muzzleFlash = flash;
+
     // Held at the right hand: just outside the right arm (arm pivot at
     // x=1.12 plus arm width), around hand height, slightly forward.
-    gunGroup.position.set(1.56, 0.7, -0.6);
+    this.gunRestPosition = new THREE.Vector3(1.56, 0.7, -0.6);
+    gunGroup.position.copy(this.gunRestPosition);
+
+    // Recoil spring: triggerGunRecoil() kicks it, updateGunRecoil() (called
+    // every frame) eases it back to rest.
+    this.gunRecoil = 0;
 
     this.gun = gunGroup;
     this.mesh.add(this.gun);
+  }
+
+  // Kick the gun back/up and light the muzzle flash. Called for the local
+  // player on every shot, and for remote players when their shot broadcast
+  // arrives.
+  triggerGunRecoil(strength = 1) {
+    this.gunRecoil = Math.min(this.gunRecoil + strength, 2.5);
+    if (this.muzzleFlash) {
+      this.muzzleFlash.visible = true;
+      this.muzzleFlash.rotation.z = Math.random() * Math.PI; // vary the star shape
+      clearTimeout(this._muzzleFlashTimer);
+      this._muzzleFlashTimer = setTimeout(() => {
+        this.muzzleFlash.visible = false;
+      }, 55);
+    }
+  }
+
+  // Per-frame gun animation: recoil spring-back, plus (local first person
+  // only) pitching the viewmodel to follow the camera so the gun visually
+  // points where you aim.
+  updateGunRecoil(cameraMode, camera) {
+    const followPitch = (this.isLocal && cameraMode === 'firstPerson' && camera)
+      ? camera.rotation.x
+      : 0;
+    this.gun.rotation.x = followPitch + this.gunRecoil * 0.28;
+    this.gun.position.z = this.gunRestPosition.z + this.gunRecoil * 0.26;
+    this.gunRecoil *= 0.78;
+    if (this.gunRecoil < 0.01) this.gunRecoil = 0;
   }
 
   // Recolor the faction-colored surface (torso + arms). Used by faction
@@ -302,6 +354,9 @@ export class Player {
       this.mesh.rotation.y = Math.atan2(-dx, -dz); // gun/front faces local -Z
     }
     this._lastAnimPosition.copy(this.mesh.position);
+
+    // Gun recoil spring + viewmodel pitch-follow
+    this.updateGunRecoil(cameraMode, camera);
 
     // Update health bar to face camera
     this.updateHealthBarRotation(camera);
