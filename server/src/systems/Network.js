@@ -7,6 +7,7 @@ import { RoundSystem } from './RoundSystem.js';
 import { ScoreSystem } from './ScoreSystem.js';
 import { RateLimiter } from '../utils/RateLimiter.js';
 import { getSpawnPositionForFaction, BUILDINGS, JAIL, MISSION_CONTACTS, CONTACT_INTERACT_RADIUS, WORLD_HALF } from '../utils/collision.js';
+import { validateCharacterName } from '../utils/nameValidation.js';
 import * as THREE from 'three';
 
 function getClientIp(socket) {
@@ -515,14 +516,21 @@ export class NetworkSystem {
       // Handle character creation
       socket.on('createCharacter', ({ name, faction }, callback) => {
         console.log(`Creating character for ${socket.id}: ${name} (${faction})`);
-        
+
         // Validate faction
         if (faction !== 'Criminal' && faction !== 'Enforcer') {
           return callback({ success: false, error: 'Invalid faction' });
         }
-        
+
+        // Length/charset, profanity, and uniqueness -- all server-side
+        // since the client can't be trusted to self-police any of this.
+        const nameCheck = validateCharacterName(name, this.characterSystem, playerKey);
+        if (!nameCheck.valid) {
+          return callback({ success: false, error: nameCheck.error });
+        }
+
         // Create character
-        const character = this.characterSystem.createCharacter(playerKey, name, faction);
+        const character = this.characterSystem.createCharacter(playerKey, nameCheck.name, faction);
         player.setCharacter(character);
 
         // Place them at their faction's spawn -- HQ for Enforcers, anywhere

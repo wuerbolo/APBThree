@@ -18,6 +18,10 @@ export class NPC {
     // Create health bar
     this.createHealthBar();
 
+    // Knockback impulse from being shot; decays each frame (see Player.js
+    // for the same pattern on the local player getting hit).
+    this.knockback = { x: 0, z: 0 };
+
     // Faction melee weapon in the right hand (baton/knife)
     this.meleeWeapon = null;
     this.equipMeleeWeapon();
@@ -215,6 +219,21 @@ export class NPC {
     this.targetPosition.set(position.x, position.y, position.z);
   }
 
+  // Nudges the NPC away from wherever it just got shot from; the offset
+  // eases back to zero in update(). Capped so sustained SMG fire or a
+  // multi-pellet shotgun blast can't shove a body into a wall.
+  applyKnockback(dx, dz) {
+    this.knockback.x += dx;
+    this.knockback.z += dz;
+    const magnitude = Math.sqrt(this.knockback.x ** 2 + this.knockback.z ** 2);
+    const MAX_KNOCKBACK = 2.5;
+    if (magnitude > MAX_KNOCKBACK) {
+      const scale = MAX_KNOCKBACK / magnitude;
+      this.knockback.x *= scale;
+      this.knockback.z *= scale;
+    }
+  }
+
   heal(amount) {
     this.health = Math.min(50, this.health + amount);
     this.isAlive = true;
@@ -229,16 +248,35 @@ export class NPC {
   update(camera) {
     if (!this.isAlive) return;
 
-    // Smooth movement interpolation is handled here
-    const before = { x: this.mesh.position.x, z: this.mesh.position.z };
+    // Smooth movement interpolation runs on a *base* position that the
+    // knockback never touches. If the shove moved mesh.position directly,
+    // the next frame's lerp would see a bigger gap to targetPosition and
+    // correct proportionally faster -- the NPC visibly accelerates back
+    // onto its path, eating the knockback. Rendering at base + offset
+    // keeps the lerp speed constant while the offset eases out on its own.
+    if (!this._basePosition) this._basePosition = this.mesh.position.clone();
+    const before = { x: this._basePosition.x, z: this._basePosition.z };
     if (this.targetPosition) {
       const lerpFactor = 0.1;
-      this.mesh.position.lerp(this.targetPosition, lerpFactor);
+      this._basePosition.lerp(this.targetPosition, lerpFactor);
     }
 
-    // Walk cycle + face the direction of travel
-    const dx = this.mesh.position.x - before.x;
-    const dz = this.mesh.position.z - before.z;
+    // Decay the knockback offset (impulses accumulate in applyKnockback)
+    this.knockback.x *= 0.88;
+    this.knockback.z *= 0.88;
+    if (Math.abs(this.knockback.x) < 0.01) this.knockback.x = 0;
+    if (Math.abs(this.knockback.z) < 0.01) this.knockback.z = 0;
+
+    this.mesh.position.set(
+      this._basePosition.x + this.knockback.x,
+      this._basePosition.y,
+      this._basePosition.z + this.knockback.z
+    );
+
+    // Walk cycle + face the direction of travel -- driven by the base
+    // movement, so a shove doesn't spin the NPC around or pump the legs
+    const dx = this._basePosition.x - before.x;
+    const dz = this._basePosition.z - before.z;
     const moved = Math.sqrt(dx * dx + dz * dz);
     animateWalk(this.rig, moved);
     if (moved > 0.01) {

@@ -414,10 +414,14 @@ export class NetworkSystem {
             this.gameScene.localPlayer.setPosition(response.position);
           }
         }
+
+        this.gameScene.hud.closeFactionSelection();
       } else {
         console.error('Failed to create character:', response.error);
-        // Show faction selection again with error
-        this.gameScene.hud.showFactionSelection();
+        // Keep the same overlay open (with whatever the player typed still
+        // in the input) and surface why it was rejected, instead of
+        // silently wiping the form.
+        this.gameScene.hud.showFactionSelectionError(response.error || 'Could not create character');
       }
     });
   }

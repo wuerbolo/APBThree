@@ -20,6 +20,11 @@ const WEAPONS = {
 
 const WEAPON_KEYS = { '1': 'pistol', '2': 'shotgun', '3': 'smg', '4': 'sniper' };
 const INTERACT_RADIUS = 4;
+// Purely cosmetic shove applied to an NPC on every pellet that lands.
+// This is the peak *offset* in world units (it eases back to zero over a
+// few frames) -- small enough to read as a flinch, not a launch. Shotgun
+// pellets stack, so a point-blank blast shoves noticeably harder.
+const NPC_KNOCKBACK_FORCE = 0.5;
 
 export class GameScene {
   constructor() {
@@ -1293,6 +1298,15 @@ export class GameScene {
           npc._hitFlashTimer = setTimeout(() => {
             npc.setBodyColorHex(npc.isAlive ? npc.getFactionColor() : DEAD_COLOR);
           }, 100);
+
+          // Mini knockback: shove the NPC along the shot's travel direction
+          // so getting shot reads as an actual hit, not a silent number
+          // change. Every client runs this same collision check off the
+          // shared shot broadcast, so shooter and bystanders see it alike.
+          npc.applyKnockback(
+            projectile.direction.x * NPC_KNOCKBACK_FORCE,
+            projectile.direction.z * NPC_KNOCKBACK_FORCE
+          );
 
           // Remove projectile
           this.scene.remove(projectile);

@@ -399,16 +399,26 @@ export class HUD {
         const nameInput = document.createElement('input');
         nameInput.type = 'text';
         nameInput.placeholder = 'Enter your character name';
+        nameInput.maxLength = 16;
         nameInput.style.cssText = `
             padding: 15px;
             font-size: 18px;
-            margin-bottom: 30px;
+            margin-bottom: 8px;
             width: 300px;
             border: none;
             border-radius: 5px;
             text-align: center;
         `;
-        
+
+        const nameError = document.createElement('div');
+        nameError.id = 'faction-selection-error';
+        nameError.style.cssText = `
+            color: #ff5252;
+            font-size: 14px;
+            min-height: 18px;
+            margin-bottom: 22px;
+        `;
+
         const buttonsContainer = document.createElement('div');
         buttonsContainer.style.cssText = `
             display: flex;
@@ -421,31 +431,41 @@ export class HUD {
         const criminalButton = this.createFactionButton('Criminal', '#d32f2f', 'Operate outside the law, gain reputation by defeating Enforcers.');
         const enforcerButton = this.createFactionButton('Enforcer', '#1976d2', `Uphold the law, gain reputation by defeating ${getFactionDisplayName('Criminal')}s.`);
 
+        // Overlay stays open until the server confirms the name -- it can
+        // reject for profanity/charset/uniqueness, and closing early would
+        // both lose what the player typed and give no indication why
+        // nothing happened.
         criminalButton.onclick = () => {
             const name = nameInput.value || `${getFactionDisplayName('Criminal')}${Math.floor(Math.random() * 1000)}`;
             this.selectFaction('Criminal', name);
-            overlay.remove();
-            if (this.gameScene.cameraMode === 'firstPerson') {
-                this.gameScene.renderer.domElement.requestPointerLock();
-            }
         };
 
         enforcerButton.onclick = () => {
             const name = nameInput.value || `Enforcer${Math.floor(Math.random() * 1000)}`;
             this.selectFaction('Enforcer', name);
-            overlay.remove();
-            if (this.gameScene.cameraMode === 'firstPerson') {
-                this.gameScene.renderer.domElement.requestPointerLock();
-            }
         };
 
         buttonsContainer.appendChild(criminalButton);
         buttonsContainer.appendChild(enforcerButton);
-        
+
         overlay.appendChild(title);
         overlay.appendChild(nameInput);
+        overlay.appendChild(nameError);
         overlay.appendChild(buttonsContainer);
         document.body.appendChild(overlay);
+    }
+
+    showFactionSelectionError(message) {
+        const el = document.getElementById('faction-selection-error');
+        if (el) el.textContent = message;
+    }
+
+    closeFactionSelection() {
+        const overlay = document.getElementById('factionSelection');
+        if (overlay) overlay.remove();
+        if (this.gameScene && this.gameScene.cameraMode === 'firstPerson') {
+            this.gameScene.renderer.domElement.requestPointerLock();
+        }
     }
     
     createFactionButton(faction, color, description) {
