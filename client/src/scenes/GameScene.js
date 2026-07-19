@@ -81,6 +81,7 @@ export class GameScene {
     // Setup systems
     this.network = new NetworkSystem(this);
     this.hud = new HUD(this);
+    this.hud.showTitleScreen();
 
     // Setup event listeners
     this.setupEventListeners();

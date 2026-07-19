@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { resolveBuildingCollision, resolveEntityCollision, WORLD_HALF } from '../utils/collision.js';
 import { getFactionColor as resolveFactionColor, DEAD_COLOR } from '../utils/factionColors.js';
-import { buildCharacterMesh, animateWalk, buildHatMesh } from '../utils/characterModel.js';
+import { buildCharacterMesh, animateWalk, buildHatMesh, playDeathAnimation, resetDeathPose } from '../utils/characterModel.js';
 
 export class Player {
   constructor(id, isLocal = false) {
@@ -205,10 +205,21 @@ export class Player {
   // dimming, so a low-health teammate doesn't start looking like a
   // different faction.
   applyHealthUpdate(health, isAlive) {
+    const wasAlive = this.isAlive;
     this.health = health;
     this.isAlive = isAlive;
     this.updateHealthBar();
     this.setBodyColorHex(isAlive ? this.getFactionColor() : DEAD_COLOR);
+
+    // Topple over on the alive->dead transition; a floating health bar over
+    // a body lying sideways looks wrong, so hide it until respawn.
+    if (wasAlive && !isAlive) {
+      playDeathAnimation(this.rig);
+      this.healthBarContainer.visible = false;
+    } else if (!wasAlive && isAlive) {
+      resetDeathPose(this.rig, this.groundY);
+      this.healthBarContainer.visible = true;
+    }
   }
 
   // Nudges the player away from wherever they just got hit from; decays
@@ -297,6 +308,10 @@ export class Player {
   }
 
   setPosition(position) {
+    // A dead body's pose (lying on the ground at LYING_Y) is owned by the
+    // death animation -- the dead player's client still echoes its stale
+    // upright position every frame, which would yank the body back up.
+    if (!this.isAlive) return;
     // Remote players only move through here -- drive their walk animation
     // and facing from the position delta.
     if (!this.isLocal) {
@@ -339,6 +354,10 @@ export class Player {
     // Reset health and alive status
     this.health = 100;
     this.isAlive = true;
+
+    // Back on your feet: undo the death-animation pose
+    resetDeathPose(this.rig, this.groundY);
+    this.healthBarContainer.visible = true;
 
     // Position is set by the caller from the server's 'playerRespawned'
     // event (faction-specific spawn point), not decided here.

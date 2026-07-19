@@ -89,6 +89,87 @@ export function animateWalk(rig, distanceMoved) {
   }
 }
 
+// --- Death / respawn pose --------------------------------------------------
+
+// Topples the rig over: gravity-accelerated fall onto its face or back
+// (random), with a slight sideways twist, a small bounce off the ground,
+// and limbs going limp mid-fall. Runs on its own rAF loop -- entity update
+// loops early-return for dead entities, so this can't be driven from there.
+// The group's y is animated down so the lying body rests on the ground
+// (torso depth/2 ~= 0.5) instead of hovering at hip height.
+const LYING_Y = 0.55;
+
+export function playDeathAnimation(rig) {
+  cancelDeathAnimation(rig);
+  const group = rig.group;
+  const { leftLeg, rightLeg, leftArm, rightArm } = rig.limbs;
+
+  const fallSign = Math.random() < 0.5 ? 1 : -1; // face-plant vs. onto the back
+  const twist = (Math.random() - 0.5) * 0.7;
+  const startY = group.position.y;
+  const startLimbX = {
+    leftLeg: leftLeg.rotation.x, rightLeg: rightLeg.rotation.x,
+    leftArm: leftArm.rotation.x, rightArm: rightArm.rotation.x
+  };
+  const startedAt = performance.now();
+  const DURATION = 750;
+
+  // Piecewise: gravity fall (ease-in), hit the ground, small bounce, settle
+  const fallCurve = (p) => {
+    if (p < 0.55) { const t = p / 0.55; return t * t; }
+    if (p < 0.75) { const t = (p - 0.55) / 0.2; return 1 - 0.08 * Math.sin(t * Math.PI); }
+    return 1;
+  };
+
+  const step = () => {
+    const p = Math.min(1, (performance.now() - startedAt) / DURATION);
+    const f = fallCurve(p);
+
+    group.rotation.x = fallSign * (Math.PI / 2) * f;
+    group.rotation.z = twist * f;
+    group.position.y = startY + (LYING_Y - startY) * f;
+
+    // Limbs go limp: walk pose eases out, arms splay away from the body
+    const limp = 1 - f;
+    leftLeg.rotation.x = startLimbX.leftLeg * limp;
+    rightLeg.rotation.x = startLimbX.rightLeg * limp;
+    leftArm.rotation.x = startLimbX.leftArm * limp;
+    rightArm.rotation.x = startLimbX.rightArm * limp;
+    leftArm.rotation.z = 0.9 * f;
+    rightArm.rotation.z = -0.9 * f;
+    leftLeg.rotation.z = 0.18 * f;
+    rightLeg.rotation.z = -0.18 * f;
+
+    if (p < 1) {
+      rig._deathAnimFrame = requestAnimationFrame(step);
+    } else {
+      rig._deathAnimFrame = null;
+    }
+  };
+  rig._deathAnimFrame = requestAnimationFrame(step);
+}
+
+export function cancelDeathAnimation(rig) {
+  if (rig._deathAnimFrame) {
+    cancelAnimationFrame(rig._deathAnimFrame);
+    rig._deathAnimFrame = null;
+  }
+}
+
+// Snaps the rig back upright (respawn/revive) -- undoes everything
+// playDeathAnimation touched.
+export function resetDeathPose(rig, groundY = 1) {
+  cancelDeathAnimation(rig);
+  const group = rig.group;
+  group.rotation.x = 0;
+  group.rotation.z = 0;
+  group.position.y = groundY;
+  for (const limb of Object.values(rig.limbs)) {
+    limb.rotation.x = 0;
+    limb.rotation.z = 0;
+  }
+}
+
 // --- Cosmetics (hats) ------------------------------------------------------
 
 // Client-side catalog for the shop UI and hat meshes. Prices here are

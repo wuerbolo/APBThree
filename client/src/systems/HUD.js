@@ -6,6 +6,194 @@ export class HUD {
         this.gameScene = gameScene;
     }
 
+    // Title screen shown on arrival: big animated "B.O.L.O" letters
+    // (Minecraft-style drop-in + idle bob, blocky 3D extrusion), a pulsing
+    // yellow splash line, and a police-light color wash. The game keeps
+    // connecting/rendering underneath; PLAY (or Enter) drops you in -- the
+    // faction selection, if needed, is already waiting below this overlay.
+    showTitleScreen() {
+        if (document.getElementById('title-screen')) return;
+
+        const style = document.createElement('style');
+        style.id = 'title-screen-style';
+        style.textContent = `
+            @keyframes bolo-letter-drop {
+                0% { transform: translateY(-140vh); }
+                60% { transform: translateY(0); }
+                75% { transform: translateY(-28px); }
+                88% { transform: translateY(0); }
+                95% { transform: translateY(-9px); }
+                100% { transform: translateY(0); }
+            }
+            @keyframes bolo-letter-bob {
+                0%, 100% { transform: translateY(0) rotate(-1.2deg); }
+                50% { transform: translateY(-7px) rotate(1.2deg); }
+            }
+            @keyframes bolo-splash-pulse {
+                0%, 100% { transform: rotate(-12deg) scale(1); }
+                50% { transform: rotate(-12deg) scale(1.13); }
+            }
+            @keyframes bolo-lights {
+                0%, 100% { background-position: 0% 50%; }
+                50% { background-position: 100% 50%; }
+            }
+            @keyframes bolo-fade-up {
+                from { opacity: 0; transform: translateY(24px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            #title-screen .bolo-letter {
+                display: inline-block;
+                animation: bolo-letter-drop 1.1s cubic-bezier(0.22, 1, 0.36, 1) both,
+                           bolo-letter-bob 2.6s ease-in-out infinite;
+            }
+            #title-screen .bolo-dot {
+                display: inline-block;
+                color: #ffb300;
+                animation: bolo-fade-up 0.5s ease-out both;
+            }
+        `;
+        document.head.appendChild(style);
+
+        const overlay = document.createElement('div');
+        overlay.id = 'title-screen';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            font-family: Arial, sans-serif;
+            background:
+                radial-gradient(circle at 50% 120%, rgba(0,0,0,0.35), rgba(0,0,0,0.92) 70%),
+                linear-gradient(115deg, #3b0d0d, #10101c 35%, #0d1f3b 65%, #10101c);
+            background-size: 100% 100%, 300% 300%;
+            animation: bolo-lights 7s ease-in-out infinite;
+            overflow: hidden;
+        `;
+
+        // B . O . L . O -- letters drop in one by one, dots fade in after
+        const logo = document.createElement('div');
+        logo.style.cssText = `
+            font-size: clamp(72px, 16vw, 170px);
+            font-weight: 900;
+            color: #f5f5f5;
+            letter-spacing: 0.04em;
+            line-height: 1;
+            text-shadow:
+                3px 3px 0 #8a8a8a, 6px 6px 0 #5c5c5c, 9px 9px 0 #333,
+                12px 12px 22px rgba(0, 0, 0, 0.9);
+            user-select: none;
+        `;
+        const parts = ['B', '.', 'O', '.', 'L', '.', 'O'];
+        parts.forEach((ch, i) => {
+            const span = document.createElement('span');
+            span.textContent = ch;
+            if (ch === '.') {
+                span.className = 'bolo-dot';
+                span.style.animationDelay = `${1.0 + i * 0.08}s`;
+            } else {
+                span.className = 'bolo-letter';
+                // Stagger the drop; desync the idle bob so it doesn't march in unison
+                span.style.animationDelay = `${i * 0.14}s, ${1.4 + i * 0.33}s`;
+            }
+            logo.appendChild(span);
+        });
+
+        // Pulsing yellow splash, Minecraft-style, hanging off the logo's corner
+        const SPLASHES = [
+            'Be On the Look Out!',
+            'Wanted: you!',
+            'Crime pays. Sometimes.',
+            'Protect and serve!',
+            'Shoot first, respawn later!',
+            'Now with 100% more sirens!'
+        ];
+        const splash = document.createElement('div');
+        splash.textContent = SPLASHES[Math.floor(Math.random() * SPLASHES.length)];
+        splash.style.cssText = `
+            color: #ffff54;
+            font-size: clamp(14px, 2.4vw, 24px);
+            font-weight: bold;
+            text-shadow: 2px 2px 0 #3f3f00;
+            animation: bolo-splash-pulse 0.9s ease-in-out infinite;
+            margin-top: -0.6em;
+            align-self: flex-end;
+            margin-right: 8vw;
+            user-select: none;
+        `;
+
+        const tagline = document.createElement('div');
+        tagline.textContent = 'BE ON THE LOOK OUT';
+        tagline.style.cssText = `
+            color: rgba(255, 255, 255, 0.55);
+            font-size: clamp(12px, 1.6vw, 17px);
+            letter-spacing: 0.55em;
+            margin-top: 26px;
+            animation: bolo-fade-up 0.7s ease-out 1.5s both;
+            user-select: none;
+        `;
+
+        const playButton = document.createElement('button');
+        playButton.textContent = 'PLAY';
+        playButton.style.cssText = `
+            margin-top: 48px;
+            padding: 16px 72px;
+            font-size: 26px;
+            font-weight: bold;
+            letter-spacing: 0.2em;
+            color: white;
+            background: linear-gradient(180deg, #e53935, #b71c1c);
+            border: 2px solid #ff8a80;
+            border-radius: 6px;
+            cursor: pointer;
+            box-shadow: 0 6px 18px rgba(229, 57, 53, 0.45);
+            transition: transform 0.15s, box-shadow 0.15s;
+            animation: bolo-fade-up 0.7s ease-out 1.9s both;
+            font-family: Arial, sans-serif;
+        `;
+        playButton.onmouseover = () => {
+            playButton.style.transform = 'scale(1.07)';
+            playButton.style.boxShadow = '0 10px 26px rgba(229, 57, 53, 0.7)';
+        };
+        playButton.onmouseout = () => {
+            playButton.style.transform = 'scale(1)';
+            playButton.style.boxShadow = '0 6px 18px rgba(229, 57, 53, 0.45)';
+        };
+
+        const enterHint = document.createElement('div');
+        enterHint.textContent = 'or press Enter';
+        enterHint.style.cssText = `
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 13px;
+            margin-top: 14px;
+            animation: bolo-fade-up 0.7s ease-out 2.2s both;
+            user-select: none;
+        `;
+
+        const dismiss = () => {
+            window.removeEventListener('keydown', onEnter);
+            overlay.remove();
+            style.remove();
+        };
+        const onEnter = (event) => {
+            if (event.key === 'Enter') dismiss();
+        };
+        playButton.onclick = dismiss;
+        window.addEventListener('keydown', onEnter);
+
+        overlay.appendChild(logo);
+        overlay.appendChild(splash);
+        overlay.appendChild(tagline);
+        overlay.appendChild(playButton);
+        overlay.appendChild(enterHint);
+        document.body.appendChild(overlay);
+    }
+
     // Brief red vignette flash when the local player takes damage.
     flashDamage() {
         let flash = document.getElementById('damage-flash');

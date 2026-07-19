@@ -1,5 +1,5 @@
 import { io } from 'socket.io-client';
-import { DEAD_COLOR, getFactionDisplayName } from '../utils/factionColors.js';
+import { getFactionDisplayName } from '../utils/factionColors.js';
 import { sound } from '../utils/sound.js';
 
 // Persistent per-browser identity so the server can hand you back your
@@ -78,9 +78,13 @@ export class NetworkSystem {
         }
       });
 
-      // Initialize NPCs
-      npcs.forEach(({ id, position, faction }) => {
+      // Initialize NPCs (a corpse the server still tracks joins lying down)
+      npcs.forEach(({ id, position, faction, health }) => {
         this.gameScene.addNPC(id, position, faction);
+        if (health && !health.isAlive) {
+          const npc = this.gameScene.npcs.get(id);
+          if (npc) npc.applyHealthUpdate(health.health, health.isAlive);
+        }
       });
 
       // Initialize any money pickups already on the ground
@@ -227,11 +231,7 @@ export class NetworkSystem {
       // Update health if provided
       if (health) {
         const npc = this.gameScene.npcs.get(id);
-        if (npc) {
-          npc.health = health.health;
-          npc.isAlive = health.isAlive;
-          npc.updateHealthBar();
-        }
+        if (npc) npc.applyHealthUpdate(health.health, health.isAlive);
       }
     });
 
@@ -297,19 +297,13 @@ export class NetworkSystem {
       if (isNPC) {
         const npc = this.gameScene.npcs.get(id);
         if (npc) {
-          const oldHealth = npc.health;
-          npc.health = health;
-          npc.isAlive = isAlive;
-
           // Update faction if provided
           if (faction && faction !== npc.faction) {
             npc.setFaction(faction);
           }
 
-          npc.updateHealthBar();
-          console.log(`NPC ${id} health changed from ${oldHealth} to ${health}`);
-
-          npc.setBodyColorHex(isAlive ? npc.getFactionColor() : DEAD_COLOR);
+          // Handles recolor + death topple / stand-back-up transitions
+          npc.applyHealthUpdate(health, isAlive);
         }
       } else {
         const player = id === this.socket.id ?

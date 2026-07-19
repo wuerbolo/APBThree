@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { getFactionColor as resolveFactionColor, DEAD_COLOR } from '../utils/factionColors.js';
-import { buildCharacterMesh, animateWalk } from '../utils/characterModel.js';
+import { buildCharacterMesh, animateWalk, playDeathAnimation, resetDeathPose } from '../utils/characterModel.js';
 
 export class NPC {
   constructor(id, position, faction = "Civilian") {
@@ -116,6 +116,24 @@ export class NPC {
     }
 
     return this.isAlive;
+  }
+
+  // Authoritative health/alive state from the server. Handles the topple
+  // animation on death and standing back up on revive/respawn.
+  applyHealthUpdate(health, isAlive) {
+    const wasAlive = this.isAlive;
+    this.health = health;
+    this.isAlive = isAlive;
+    this.updateHealthBar();
+    this.setBodyColorHex(isAlive ? this.getFactionColor() : DEAD_COLOR);
+
+    if (wasAlive && !isAlive) {
+      playDeathAnimation(this.rig);
+      this.healthBarContainer.visible = false;
+    } else if (!wasAlive && isAlive) {
+      resetDeathPose(this.rig, 1);
+      this.healthBarContainer.visible = true;
+    }
   }
   
   // Update faction and related visuals
