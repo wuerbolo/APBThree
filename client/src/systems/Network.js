@@ -6,12 +6,14 @@ import { sound } from '../utils/sound.js';
 // character across refreshes and server restarts.
 function getPlayerToken() {
   try {
-    let token = localStorage.getItem('apb-player-token');
+    // Renamed from 'apb-player-token' during the BOLO rebrand -- fall back to
+    // the old key so existing players don't lose their saved character.
+    let token = localStorage.getItem('bolo-player-token') || localStorage.getItem('apb-player-token');
     if (!token) {
       token = (crypto.randomUUID && crypto.randomUUID())
         || `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      localStorage.setItem('apb-player-token', token);
     }
+    localStorage.setItem('bolo-player-token', token);
     return token;
   } catch (e) {
     return null; // private browsing etc. -- falls back to per-session identity

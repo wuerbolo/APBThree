@@ -1,8 +1,8 @@
 services:
   app:
     build: .
-    image: apb-three:latest
-    container_name: apb-three
+    image: bolo:latest
+    container_name: bolo
     restart: unless-stopped
     mem_limit: 512m
     mem_reservation: 256m
@@ -13,10 +13,10 @@ services:
       - proxy
     labels:
       - traefik.enable=true
-      - traefik.http.routers.apb-three.rule=Host(`${DOMAIN:-bolo.wuerbo.com}`)
-      - traefik.http.routers.apb-three.entrypoints=websecure
-      - traefik.http.routers.apb-three.tls.certresolver=letsencrypt
-      - traefik.http.services.apb-three.loadbalancer.server.port=3000
+      - traefik.http.routers.bolo.rule=Host(`${DOMAIN:-bolo.wuerbo.com}`)
+      - traefik.http.routers.bolo.entrypoints=websecure
+      - traefik.http.routers.bolo.tls.certresolver=letsencrypt
+      - traefik.http.services.bolo.loadbalancer.server.port=3000
 
 networks:
   proxy:

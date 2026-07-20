@@ -1,4 +1,4 @@
-# APBThree
+# B.O.L.O
 
 A browser-playable multiplayer game inspired by APB: pick **Criminal** or
 **Enforcer**, roam a low-poly city, fight the opposing faction (players and
@@ -33,8 +33,8 @@ pnpm preview    # preview the built client
 ## Docker
 
 ```sh
-docker build -t apb-three .
-docker run -p 3000:3000 apb-three
+docker build -t bolo .
+docker run -p 3000:3000 bolo
 ```
 
 `docker-compose.yml` is set up for the production VPS (Traefik labels,

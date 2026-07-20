@@ -1,5 +1,5 @@
 {
-  "name": "@apb-three/client",
+  "name": "@bolo/client",
   "private": true,
   "version": "0.1.0",
   "type": "module",

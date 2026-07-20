@@ -13,7 +13,7 @@ RUN pnpm install --frozen-lockfile
 COPY client ./client
 COPY server ./server
 
-RUN pnpm --filter @apb-three/client build
+RUN pnpm --filter @bolo/client build
 
 # --- Stage 2: slim runtime, server-only deps + built client assets ---
 FROM node:20-alpine AS runtime

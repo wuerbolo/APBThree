@@ -1,4 +1,4 @@
-# APBThree
+# B.O.L.O
 
 Browser-playable multiplayer game inspired by APB (bounty-hunter online game).
 Three.js (client) + Node/Express/Socket.io (server), pnpm workspace monorepo.
