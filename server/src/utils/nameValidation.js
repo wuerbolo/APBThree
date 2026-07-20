@@ -29,7 +29,7 @@ function normalizeForProfanityCheck(name) {
     .replace(/@/g, 'a');
 }
 
-function containsProfanity(name) {
+export function containsProfanity(name) {
   const normalized = normalizeForProfanityCheck(name);
   return BLOCKED_SUBSTRINGS.some(word => normalized.includes(word));
 }

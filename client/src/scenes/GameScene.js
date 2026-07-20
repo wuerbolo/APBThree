@@ -591,6 +591,24 @@ export class GameScene {
 
     // Keyboard controls
     window.addEventListener('keydown', (event) => {
+      // While the chat input is open, keys belong to it (its own listener
+      // also stops propagation; this is the fallback if focus is lost)
+      if (this.hud.isChatInputOpen()) return;
+
+      // Open chat -- but not while typing in another field (e.g. the
+      // character-name input), and not on the same Enter press that just
+      // dismissed the title screen
+      if (event.key === 'Enter' && this.character) {
+        const typing = document.activeElement &&
+          (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
+        const justDismissedTitle = performance.now() - (this.hud.titleDismissedAt || 0) < 300;
+        if (!typing && !document.getElementById('title-screen') && !justDismissedTitle) {
+          event.preventDefault();
+          this.hud.openChatInput();
+          return;
+        }
+      }
+
       if (this.localPlayer) {
         this.localPlayer.handleKeyDown(event);
       }
@@ -668,6 +686,9 @@ export class GameScene {
     // Shooting: left click fires (hold to auto-fire with the SMG); right
     // click aims down the sniper scope.
     document.addEventListener('mousedown', (event) => {
+      // Don't fire while typing in chat (pointer lock stays held, so a
+      // stray click would otherwise shoot)
+      if (this.hud.isChatInputOpen()) return;
       if (event.button === 0) {
         this.mouseDown = true;
         this.tryShoot();

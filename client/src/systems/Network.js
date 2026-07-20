@@ -206,6 +206,10 @@ export class NetworkSystem {
       this.gameScene.hud.animateCharacterPenalty(oldCharacter, characterData);
     });
 
+    this.socket.on('chat', (data) => {
+      this.gameScene.hud.addChatMessage(data);
+    });
+
     this.socket.on('playerUpdated', ({ id, character }) => {
       // Update remote player's character data (and recolor them to match)
       const remotePlayer = this.gameScene.remotePlayers.get(id);
@@ -436,6 +440,17 @@ export class NetworkSystem {
         // in the input) and surface why it was rejected, instead of
         // silently wiping the form.
         this.gameScene.hud.showFactionSelectionError(response.error || 'Could not create character');
+      }
+    });
+  }
+
+  // Send a chat message; rejections (rate limit, profanity, no character)
+  // come back through the ack and show only to this player, as a gray
+  // system line in the chat log.
+  sendChat(text) {
+    this.socket.emit('chat', text, (response) => {
+      if (response && response.error) {
+        this.gameScene.hud.addChatMessage({ isSystem: true, text: response.error });
       }
     });
   }

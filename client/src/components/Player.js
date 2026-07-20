@@ -249,6 +249,50 @@ export class Player {
     }
     this.applyCosmetic(character && character.equippedCosmetic);
     this.updateHealthBar();
+    this.updateNameTag();
+  }
+
+  // Floating name above the health bar, faction-colored, so you can tell
+  // players apart (and apart from NPCs, who have no tag). Remote players
+  // only -- your own name would just hover in the first-person camera.
+  // Lives inside healthBarContainer so it inherits the hide-on-death /
+  // show-on-respawn toggles for free.
+  updateNameTag() {
+    const name = (!this.isLocal && this.character) ? this.character.name : null;
+    const faction = this.character ? this.character.faction : null;
+    if (!name) {
+      if (this.nameTag) {
+        this.healthBarContainer.remove(this.nameTag);
+        this.nameTag = null;
+      }
+      return;
+    }
+    if (this.nameTag && this._nameTagKey === `${name}|${faction}`) return;
+    this._nameTagKey = `${name}|${faction}`;
+    if (this.nameTag) this.healthBarContainer.remove(this.nameTag);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 96;
+    const ctx = canvas.getContext('2d');
+    ctx.font = 'bold 52px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillStyle = `#${this.getFactionColor().toString(16).padStart(6, '0')}`;
+    ctx.strokeText(name, canvas.width / 2, canvas.height / 2);
+    ctx.fillText(name, canvas.width / 2, canvas.height / 2);
+
+    const material = new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(canvas),
+      transparent: true,
+      depthTest: false
+    });
+    this.nameTag = new THREE.Sprite(material);
+    this.nameTag.position.y = 3.85; // just above the health bar (y=3.3)
+    this.nameTag.scale.set(3.2, 0.6, 1);
+    this.healthBarContainer.add(this.nameTag);
   }
 
   // Server is the source of truth for health/alive state; this applies an

@@ -9,7 +9,7 @@ import { RoundSystem } from './RoundSystem.js';
 import { ScoreSystem } from './ScoreSystem.js';
 import { RateLimiter } from '../utils/RateLimiter.js';
 import { getSpawnPositionForFaction, BUILDINGS, JAIL, MISSION_CONTACTS, CONTACT_INTERACT_RADIUS, WORLD_HALF } from '../utils/collision.js';
-import { validateCharacterName } from '../utils/nameValidation.js';
+import { validateCharacterName, containsProfanity } from '../utils/nameValidation.js';
 import * as THREE from 'three';
 
 function getClientIp(socket) {
@@ -108,6 +108,8 @@ export class NetworkSystem {
     // event) landing twice in the same second.
     this.damageLimiter = new RateLimiter(40, 1000);
     this.interactLimiter = new RateLimiter(5, 1000);
+    // Chat: enough for a conversation, not enough to flood the screen
+    this.chatLimiter = new RateLimiter(5, 5000);
 
     // Initialize character system
     this.characterSystem = new CharacterSystem();
@@ -1028,6 +1030,30 @@ export class NetworkSystem {
         socket.broadcast.emit('playerUpdated', { id: socket.id, character: character.getData() });
       });
 
+      // In-game chat: server-side length cap, whitespace collapse, the
+      // same profanity blocklist as character names, and a rate limit.
+      // The ack callback carries rejections back to just the sender;
+      // accepted messages broadcast to everyone including them.
+      socket.on('chat', (text, callback) => {
+        const respond = typeof callback === 'function' ? callback : () => {};
+        const player = this.players.get(socket.id);
+        if (!player || !player.hasCharacter()) return respond({ error: 'Create a character first' });
+        if (!this.chatLimiter.allow(socket.id)) return respond({ error: 'You are sending messages too fast' });
+
+        const message = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+        if (!message) return respond({ error: 'Empty message' });
+        if (containsProfanity(message)) return respond({ error: 'Watch your language' });
+
+        const character = player.getCharacter();
+        this.io.emit('chat', {
+          id: socket.id,
+          name: character.name,
+          faction: character.faction,
+          text: message
+        });
+        respond({ ok: true });
+      });
+
       // Handle disconnection
       socket.on('disconnect', () => {
         console.log(`Player disconnected: ${socket.id} from ${clientIp}`);
@@ -1039,6 +1065,8 @@ export class NetworkSystem {
         this.positionLimiter.clear(socket.id);
         this.shootLimiter.clear(socket.id);
         this.damageLimiter.clear(socket.id);
+        this.interactLimiter.clear(socket.id);
+        this.chatLimiter.clear(socket.id);
       });
     });
   }

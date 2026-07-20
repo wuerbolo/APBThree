@@ -241,6 +241,9 @@ export class HUD {
             window.removeEventListener('keydown', onEnter);
             overlay.remove();
             style.remove();
+            // Lets GameScene ignore the Enter press that dismissed the
+            // title, so it doesn't immediately open the chat input too
+            this.titleDismissedAt = performance.now();
         };
         const onEnter = (event) => {
             if (event.key === 'Enter') dismiss();
@@ -529,6 +532,138 @@ export class HUD {
     // character creation, needs a name), this just picks a faction on the
     // existing character -- server treats it like a respawn into the new
     // faction's spawn.
+    // --- In-game chat ------------------------------------------------------
+    // Minecraft-style: a message log in the bottom-left that fades out
+    // after a few seconds, and an input line that opens with Enter. The
+    // log ignores the mouse entirely so it never blocks shooting.
+
+    ensureChatLog() {
+        let log = document.getElementById('chat-log');
+        if (log) return log;
+        log = document.createElement('div');
+        log.id = 'chat-log';
+        log.style.cssText = `
+            position: fixed;
+            left: 15px;
+            bottom: 52px;
+            width: 380px;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            gap: 2px;
+            z-index: 800;
+            font-family: Arial, sans-serif;
+            font-size: 13px;
+            pointer-events: none;
+        `;
+        document.body.appendChild(log);
+        return log;
+    }
+
+    chatFactionColor(faction) {
+        if (faction === 'Criminal') return '#ff6b6b';
+        if (faction === 'Enforcer') return '#6bb2ff';
+        return '#cccccc';
+    }
+
+    addChatMessage({ name, faction, text, isSystem }) {
+        const log = this.ensureChatLog();
+
+        const line = document.createElement('div');
+        line.style.cssText = `
+            background: rgba(0, 0, 0, 0.45);
+            color: #ffffff;
+            padding: 3px 8px;
+            border-radius: 3px;
+            word-wrap: break-word;
+            transition: opacity 0.6s;
+        `;
+        if (isSystem) {
+            line.style.color = '#999999';
+            line.style.fontStyle = 'italic';
+            line.textContent = text;
+        } else {
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = `${name}: `;
+            nameSpan.style.cssText = `color: ${this.chatFactionColor(faction)}; font-weight: bold;`;
+            line.appendChild(nameSpan);
+            line.appendChild(document.createTextNode(text));
+        }
+
+        log.appendChild(line);
+        while (log.children.length > 8) log.removeChild(log.firstChild);
+
+        // Fade after 10s; while the input is open everything is re-shown
+        line._fadeTimer = setTimeout(() => { line.style.opacity = '0'; }, 10000);
+    }
+
+    isChatInputOpen() {
+        return !!document.getElementById('chat-input');
+    }
+
+    openChatInput() {
+        if (this.isChatInputOpen()) return;
+        const log = this.ensureChatLog();
+        // Bring faded history back while typing
+        for (const line of log.children) {
+            clearTimeout(line._fadeTimer);
+            line.style.opacity = '1';
+        }
+
+        const input = document.createElement('input');
+        input.id = 'chat-input';
+        input.type = 'text';
+        input.maxLength = 200;
+        input.placeholder = 'Chat -- Enter to send, Esc to cancel';
+        input.autocomplete = 'off';
+        input.style.cssText = `
+            position: fixed;
+            left: 15px;
+            bottom: 15px;
+            width: 380px;
+            padding: 7px 8px;
+            background: rgba(0, 0, 0, 0.65);
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            border-radius: 3px;
+            font-family: Arial, sans-serif;
+            font-size: 13px;
+            outline: none;
+            z-index: 810;
+        `;
+
+        // Keys typed here belong to the chat, not to the game -- without
+        // this, typing "w" would also start walking.
+        const swallow = (event) => {
+            event.stopPropagation();
+            if (event.key === 'Enter') {
+                const text = input.value.trim();
+                if (text) this.gameScene.network.sendChat(text);
+                this.closeChatInput();
+            } else if (event.key === 'Escape') {
+                this.closeChatInput();
+            }
+        };
+        input.addEventListener('keydown', swallow);
+        input.addEventListener('keyup', (event) => event.stopPropagation());
+
+        document.body.appendChild(input);
+        input.focus();
+    }
+
+    closeChatInput() {
+        const input = document.getElementById('chat-input');
+        if (input) input.remove();
+        // Restart the fade countdown on everything that was held visible
+        const log = document.getElementById('chat-log');
+        if (log) {
+            for (const line of log.children) {
+                clearTimeout(line._fadeTimer);
+                line._fadeTimer = setTimeout(() => { line.style.opacity = '0'; }, 4000);
+            }
+        }
+    }
+
     // Terminal overlay for kick/ban: the server has already closed the
     // socket (no auto-reconnect), so this sits above everything with no way
     // to dismiss it -- refreshing is the only way out (and a ban survives
@@ -980,6 +1115,7 @@ export class HUD {
                 row('G', 'Dance emote')
             ].join(''))}
             ${section('Social', [
+                row('Enter', 'Chat'),
                 row('N', 'Switch faction'),
                 row('Tab (hold)', 'Show online roster'),
                 row('H', 'Toggle this help')
