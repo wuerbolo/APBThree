@@ -2,6 +2,7 @@ import { Server } from 'socket.io';
 import { PlayerModel } from '../models/PlayerModel.js';
 import { NPCSpawner } from './NPCSpawner.js';
 import { CharacterSystem } from './CharacterSystem.js';
+import { MetricsSystem } from './MetricsSystem.js';
 import { MissionSystem } from './MissionSystem.js';
 import { RoundSystem } from './RoundSystem.js';
 import { ScoreSystem } from './ScoreSystem.js';
@@ -109,6 +110,9 @@ export class NetworkSystem {
 
     // Initialize character system
     this.characterSystem = new CharacterSystem();
+
+    // Sessions/duration/D1 retention -- see server/src/systems/MetricsSystem.js
+    this.metricsSystem = new MetricsSystem();
 
     // Faction missions (multi-stage jobs with rewards)
     this.missionSystem = new MissionSystem(this);
@@ -271,6 +275,8 @@ export class NetworkSystem {
       // token in the socket.io auth payload; characters are keyed by it so
       // your character survives refreshes and server restarts.
       const playerKey = String((socket.handshake.auth && socket.handshake.auth.token) || socket.id).slice(0, 64);
+
+      this.metricsSystem.recordConnect(socket.id, playerKey);
 
       // Check if player has a character
       const existingCharacter = this.characterSystem.getCharacter(playerKey);
@@ -1007,6 +1013,7 @@ export class NetworkSystem {
       // Handle disconnection
       socket.on('disconnect', () => {
         console.log(`Player disconnected: ${socket.id} from ${clientIp}`);
+        this.metricsSystem.recordDisconnect(socket.id);
         // Keep character data in memory but remove player
         this.players.delete(socket.id);
         this.io.emit('playerLeft', socket.id);

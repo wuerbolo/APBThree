@@ -15,6 +15,17 @@ const server = createServer(app);
 // Initialize networking
 const network = new NetworkSystem(server);
 
+// Sessions/duration/D1 retention, last 30 days. If METRICS_SECRET is set,
+// requires a matching ?key= -- keeps it off public view without needing a
+// full auth system for a single read-only debug endpoint.
+app.get('/metrics', (req, res) => {
+  const secret = process.env.METRICS_SECRET;
+  if (secret && req.query.key !== secret) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  res.json(network.metricsSystem.getSummary(30));
+});
+
 // Serve the built client (see client/vite.config.js outDir)
 app.use(express.static(path.join(__dirname, '../client/dist')));
 
