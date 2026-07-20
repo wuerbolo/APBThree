@@ -84,6 +84,16 @@ const LOGIN_STREAK_CAP_DAYS = 7;
 const AIRDROP_INTERVAL_MS = 120000;
 const AIRDROP_CLAIM_RADIUS = 2.5;
 
+// Golden hour: a fixed daily event window when airdrops spawn 3x as often
+// and pay double. Announced 10 minutes ahead so it works as an
+// appointment -- the whole point is concentrating a small player base
+// into the same hour. UTC hour, overridable per deployment (19 UTC =
+// 20:00/21:00 Madrid depending on DST).
+const GOLDEN_HOUR_UTC_START = Number(process.env.GOLDEN_HOUR_UTC_START ?? 19);
+const GOLDEN_WARNING_MINUTES = 10;
+const GOLDEN_AIRDROP_FREQ_MULT = 3;
+const GOLDEN_AIRDROP_PAY_MULT = 2;
+
 // Authoritative weapon stats for the 'shoot' -> 'damage' flow. The client
 // sends a weapon id and hit targets, but damage amount, fire rate and max
 // range are always taken from here -- never trusted from the client. This
@@ -173,9 +183,14 @@ export class NetworkSystem {
     this.maintainMedkits();
     setInterval(() => this.maintainMedkits(), 5000);
 
-    // Periodic cash airdrop everyone races to claim
-    setInterval(() => this.spawnAirdrop(), AIRDROP_INTERVAL_MS);
-    setTimeout(() => this.spawnAirdrop(), 45000);
+    // Periodic cash airdrop everyone races to claim. Self-scheduling
+    // instead of setInterval so golden hour can compress the cadence.
+    this.scheduleNextAirdrop(45000);
+
+    // Golden hour phase watcher (warning -> start -> end announcements)
+    this._goldenPhase = null;
+    this.updateGoldenHour(true);
+    setInterval(() => this.updateGoldenHour(), 20000);
 
     // WANTED stars cool off over time
     setInterval(() => this.decayWanted(), 15000);
@@ -197,11 +212,56 @@ export class NetworkSystem {
   spawnAirdrop() {
     if (this.airdrop) return; // previous one still unclaimed
     const id = `drop-${Date.now()}`;
-    const amount = 100 + Math.floor(Math.random() * 150);
+    let amount = 100 + Math.floor(Math.random() * 150);
+    if (this.isGoldenHour()) amount *= GOLDEN_AIRDROP_PAY_MULT;
     const position = randomOpenPosition();
     this.airdrop = { id, position, amount };
     this.io.emit('airdropSpawned', { id, position, amount });
     console.log(`Airdrop ${id} ($${amount}) at`, position);
+  }
+
+  // Cadence adapts per drop: normal interval outside golden hour, 3x as
+  // fast inside it. The explicit first delay covers the post-boot drop.
+  scheduleNextAirdrop(delayMs = null) {
+    const interval = delayMs ?? (this.isGoldenHour()
+      ? AIRDROP_INTERVAL_MS / GOLDEN_AIRDROP_FREQ_MULT
+      : AIRDROP_INTERVAL_MS);
+    setTimeout(() => {
+      this.spawnAirdrop();
+      this.scheduleNextAirdrop();
+    }, interval);
+  }
+
+  // --- Golden hour ------------------------------------------------------------
+
+  isGoldenHour(date = new Date()) {
+    return date.getUTCHours() === GOLDEN_HOUR_UTC_START;
+  }
+
+  // Runs every 20s; emits exactly one announcement per phase transition:
+  // 'soon' at T-10min, 'start' at the top of the hour, 'end' after it.
+  // `quiet` suppresses announcements when the server boots mid-phase --
+  // players connecting later learn the state from their init payload.
+  updateGoldenHour(quiet = false) {
+    const now = new Date();
+    const hourBefore = (GOLDEN_HOUR_UTC_START + 23) % 24;
+    const phase = this.isGoldenHour(now)
+      ? 'active'
+      : (now.getUTCHours() === hourBefore && now.getUTCMinutes() >= 60 - GOLDEN_WARNING_MINUTES ? 'soon' : null);
+    if (phase === this._goldenPhase) return;
+
+    const wasActive = this._goldenPhase === 'active';
+    this._goldenPhase = phase;
+    if (quiet) return;
+
+    if (phase === 'soon') {
+      this.io.emit('goldenHour', { phase: 'soon', minutes: GOLDEN_WARNING_MINUTES });
+    } else if (phase === 'active') {
+      this.io.emit('goldenHour', { phase: 'start' });
+      this.spawnAirdrop(); // kick off the hour with an immediate drop
+    } else if (wasActive) {
+      this.io.emit('goldenHour', { phase: 'end' });
+    }
   }
 
   tryClaimAirdrop(socketId, player) {
@@ -374,7 +434,8 @@ export class NetworkSystem {
           airdrop: this.airdrop,
           character: existingCharacter.getData(),
           hasCharacter: true,
-          round: this.roundSystem.getClientState()
+          round: this.roundSystem.getClientState(),
+          goldenHour: this.isGoldenHour()
         });
 
         // After init so the client HUD is ready for the streak toast
@@ -406,7 +467,8 @@ export class NetworkSystem {
           })),
           airdrop: this.airdrop,
           hasCharacter: false,
-          round: this.roundSystem.getClientState()
+          round: this.roundSystem.getClientState(),
+          goldenHour: this.isGoldenHour()
         });
       }
 

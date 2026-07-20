@@ -1306,6 +1306,37 @@ export class HUD {
         }, 4000);
     }
 
+    // Persistent top-center pill while golden hour is live.
+    showGoldenHourBadge() {
+        if (document.getElementById('golden-hour-badge')) return;
+        const badge = document.createElement('div');
+        badge.id = 'golden-hour-badge';
+        badge.textContent = '★ GOLDEN HOUR -- 3x airdrops, 2x payouts ★';
+        badge.style.cssText = `
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(180deg, rgba(60, 45, 0, 0.85), rgba(35, 26, 0, 0.85));
+            border: 1px solid #ffd54f;
+            color: #ffd54f;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-family: Arial, sans-serif;
+            font-size: 13px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            pointer-events: none;
+            z-index: 900;
+        `;
+        document.body.appendChild(badge);
+    }
+
+    hideGoldenHourBadge() {
+        const badge = document.getElementById('golden-hour-badge');
+        if (badge) badge.remove();
+    }
+
     // First login of the day: golden streak toast under the top HUD.
     showLoginBonus(streak, bonus) {
         const toast = document.createElement('div');

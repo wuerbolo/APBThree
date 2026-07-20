@@ -58,7 +58,10 @@ export class NetworkSystem {
   }
 
   setupSocketHandlers() {
-    this.socket.on('init', ({ id, position, players, npcs, pickups, medkits, airdrop, character, hasCharacter, round }) => {
+    this.socket.on('init', ({ id, position, players, npcs, pickups, medkits, airdrop, character, hasCharacter, round, goldenHour }) => {
+      // Joined mid-golden-hour: show the persistent badge (the start/end
+      // announcements are only broadcast at the transitions themselves)
+      if (goldenHour) this.gameScene.hud.showGoldenHourBadge();
       console.log('Connected with ID:', id);
       
       // Check if player has a character
@@ -214,6 +217,23 @@ export class NetworkSystem {
     // arrives via the characterUpdated the server sends right after.
     this.socket.on('loginBonus', ({ streak, bonus }) => {
       this.gameScene.hud.showLoginBonus(streak, bonus);
+    });
+
+    // Golden hour lifecycle: 10-minute heads-up, start, end. Banner +
+    // chat line at each transition, persistent badge while it's live.
+    this.socket.on('goldenHour', ({ phase, minutes }) => {
+      const hud = this.gameScene.hud;
+      if (phase === 'soon') {
+        hud.showRoundBanner(`GOLDEN HOUR in ${minutes} min`, '#ffd54f');
+        hud.addChatMessage({ isSystem: true, text: `Golden hour starts in ${minutes} minutes -- triple airdrops, double payouts!` });
+      } else if (phase === 'start') {
+        hud.showRoundBanner('GOLDEN HOUR -- triple airdrops, double payouts!', '#ffd54f');
+        hud.showGoldenHourBadge();
+        hud.addChatMessage({ isSystem: true, text: 'Golden hour is live! Airdrops rain until the top of the hour.' });
+      } else if (phase === 'end') {
+        hud.hideGoldenHourBadge();
+        hud.showRoundBanner('Golden hour is over', '#b0bec5');
+      }
     });
 
     this.socket.on('playerUpdated', ({ id, character }) => {
