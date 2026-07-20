@@ -5,7 +5,7 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-DOMAIN="${DOMAIN:-apb.wuerbo.com}"
+DOMAIN="${DOMAIN:-bolo.wuerbo.com}"
 
 echo "==> Pulling latest master"
 git fetch origin

@@ -4,7 +4,7 @@ A browser-playable multiplayer game inspired by APB: pick **Criminal** or
 **Enforcer**, roam a low-poly city, fight the opposing faction (players and
 NPCs), earn cash and reputation, and spend it at the STORE.
 
-Live at **https://apb.wuerbo.com**.
+Live at **https://bolo.wuerbo.com**.
 
 ## Stack
 

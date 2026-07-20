@@ -61,7 +61,7 @@ assuming there's nothing to do next.
 
 ## Workflow
 
-- Deployed on a Hetzner VPS (apb.wuerbo.com) behind Traefik, managed by a
+- Deployed on a Hetzner VPS (bolo.wuerbo.com) behind Traefik, managed by a
   separate Claude Code instance running there. This (local) instance does repo
   work; the VPS instance handles deploys and ops.
 - Non-trivial changes go on a feature branch + PR rather than pushing straight
