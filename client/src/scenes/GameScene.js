@@ -730,6 +730,14 @@ export class GameScene {
         event.preventDefault();
         this.hud.showRoster(this.buildRoster());
       }
+      // WANTED poster generator (shareable PNG)
+      if ((event.key === 'p' || event.key === 'P') && this.character) {
+        if (this.hud.isWantedPosterOpen()) {
+          this.hud.closeWantedPoster();
+        } else {
+          this.hud.showWantedPoster(this.character);
+        }
+      }
       // Controls help
       if (event.key === 'h' || event.key === 'H') {
         if (this.hud.isHelpOpen()) {
@@ -753,6 +761,9 @@ export class GameScene {
       }
       if (event.key === 'Escape' && this.hud.isHelpOpen()) {
         this.hud.hideHelp();
+      }
+      if (event.key === 'Escape' && this.hud.isWantedPosterOpen()) {
+        this.hud.closeWantedPoster();
       }
     });
 

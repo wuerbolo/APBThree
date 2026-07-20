@@ -1,5 +1,6 @@
-import { getFactionDisplayName } from '../utils/factionColors.js';
+import { getFactionDisplayName, getFactionColor } from '../utils/factionColors.js';
 import { COSMETICS, SLOT_LABELS } from '../utils/characterModel.js';
+import { renderWantedPoster } from '../utils/wantedPoster.js';
 
 export class HUD {
     constructor(gameScene) {
@@ -835,10 +836,98 @@ export class HUD {
     }
 
     updateWantedStars(stars) {
+        // Kept for the WANTED poster generator (P key)
+        this.wantedStars = stars;
         const wantedEl = document.getElementById('stat-wanted');
         if (wantedEl) {
             wantedEl.textContent = stars > 0 ? '★'.repeat(stars) : '—';
             wantedEl.style.color = stars > 0 ? '#ffca28' : '';
+        }
+    }
+
+    // --- WANTED poster (P key) ---------------------------------------------
+
+    isWantedPosterOpen() {
+        return !!document.getElementById('wanted-poster-overlay');
+    }
+
+    showWantedPoster(character) {
+        if (this.isWantedPosterOpen() || !character) return;
+        if (document.pointerLockElement) document.exitPointerLock();
+
+        const stars = this.wantedStars || 0;
+        const overlay = document.createElement('div');
+        overlay.id = 'wanted-poster-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 14px;
+            z-index: 1200;
+            font-family: Arial, sans-serif;
+        `;
+
+        const canvas = document.createElement('canvas');
+        renderWantedPoster(canvas, {
+            name: character.name,
+            faction: character.faction,
+            stars,
+            bounty: stars * 30, // mirrors the server's WANTED_BOUNTY_PER_STAR
+            hatId: character.equippedCosmetic,
+            bodyColorCss: `#${getFactionColor(character.faction, true, character.equippedBodyColor).toString(16).padStart(6, '0')}`
+        });
+        canvas.style.cssText = `height: min(78vh, 640px); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7); border-radius: 3px;`;
+        overlay.appendChild(canvas);
+
+        const buttons = document.createElement('div');
+        buttons.style.cssText = `display: flex; gap: 12px;`;
+        const buttonStyle = `padding: 10px 22px; border: none; border-radius: 5px; font-weight: bold; font-size: 15px; cursor: pointer;`;
+
+        const download = document.createElement('button');
+        download.textContent = 'Download PNG';
+        download.style.cssText = buttonStyle + 'background: #ff9800; color: #111;';
+        download.onclick = () => {
+            canvas.toBlob((blob) => {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `wanted-${character.name}.png`;
+                link.click();
+                URL.revokeObjectURL(link.href);
+            });
+        };
+
+        const close = document.createElement('button');
+        close.textContent = 'Close';
+        close.style.cssText = buttonStyle + 'background: #455a64; color: #fff;';
+        close.onclick = () => this.closeWantedPoster();
+
+        buttons.appendChild(download);
+        buttons.appendChild(close);
+        overlay.appendChild(buttons);
+
+        const hint = document.createElement('div');
+        hint.textContent = 'Share it. Scare someone.';
+        hint.style.cssText = `color: #999999; font-size: 13px;`;
+        overlay.appendChild(hint);
+
+        overlay.onclick = (event) => {
+            if (event.target === overlay) this.closeWantedPoster();
+        };
+        document.body.appendChild(overlay);
+    }
+
+    closeWantedPoster() {
+        const overlay = document.getElementById('wanted-poster-overlay');
+        if (overlay) overlay.remove();
+        if (this.gameScene && this.gameScene.cameraMode === 'firstPerson') {
+            this.gameScene.renderer.domElement.requestPointerLock();
         }
     }
 
@@ -1116,6 +1205,7 @@ export class HUD {
             ].join(''))}
             ${section('Social', [
                 row('Enter', 'Chat'),
+                row('P', 'Your WANTED poster (download as PNG)'),
                 row('N', 'Switch faction'),
                 row('Tab (hold)', 'Show online roster'),
                 row('H', 'Toggle this help')
