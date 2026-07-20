@@ -3,6 +3,7 @@ import { Player } from '../components/Player';
 import { NPC } from '../components/NPC';
 import { NetworkSystem } from '../systems/Network';
 import { HUD } from '../systems/HUD.js';
+import { Tutorial } from '../systems/Tutorial.js';
 import { BUILDINGS, PLAZA, WORLD_SIZE, WORLD_HALF, JAIL, MISSION_CONTACTS, CONTACT_INTERACT_RADIUS } from '../utils/collision.js';
 import { sound } from '../utils/sound.js';
 import { DEAD_COLOR, getFactionColor } from '../utils/factionColors.js';
@@ -54,6 +55,9 @@ export class GameScene {
     // STORE building, for shop proximity checks
     this.storeBuilding = BUILDINGS.find(b => b.label === 'STORE');
     this.nearStore = false;
+
+    // First-time player checklist (starts on character creation)
+    this.tutorial = new Tutorial();
 
     // Active mission beacon (pillar of light at the current objective)
     this.missionBeacon = null;
@@ -675,9 +679,13 @@ export class GameScene {
 
       if (this.localPlayer) {
         this.localPlayer.handleKeyDown(event);
+        if (['w', 'a', 's', 'd', 'W', 'A', 'S', 'D', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+          this.tutorial.notify('move');
+        }
       }
       // Camera mode toggle
       if ((event.key === 'v' || event.key === 'V') && this.isLocalPlayerAlive()) {
+        this.tutorial.notify('camera');
         this.cameraMode = this.cameraMode === 'firstPerson' ? 'topDown' : 'firstPerson';
         if (this.cameraMode === 'topDown' && document.pointerLockElement) {
           document.exitPointerLock();
@@ -692,6 +700,7 @@ export class GameScene {
           this.hud.closeShop();
         } else if (this.nearStore) {
           this.hud.openShop(this.character);
+          this.tutorial.notify('store');
         }
       }
       // Accept a pending mission offer
@@ -925,6 +934,8 @@ export class GameScene {
     const now = Date.now();
     if (now - this.lastShotTime < weapon.cooldown) return;
     this.lastShotTime = now;
+
+    this.tutorial.notify('shoot');
 
     let origin;
     let baseDirection;

@@ -62,6 +62,12 @@ export class NetworkSystem {
       // Joined mid-golden-hour: show the persistent badge (the start/end
       // announcements are only broadcast at the transitions themselves)
       if (goldenHour) this.gameScene.hud.showGoldenHourBadge();
+
+      // Resume an unfinished tutorial from a previous session (veterans
+      // without the flag never see it; it starts on character creation)
+      if (hasCharacter && this.gameScene.tutorial.shouldResume()) {
+        this.gameScene.tutorial.start();
+      }
       console.log('Connected with ID:', id);
       
       // Check if player has a character
@@ -327,11 +333,13 @@ export class NetworkSystem {
     // Missions
     this.socket.on('missionOffer', (offer) => {
       this.gameScene.hud.showMissionOffer(offer);
+      this.gameScene.tutorial.notify('mission');
     });
 
     this.socket.on('missionUpdate', (update) => {
       this.gameScene.hud.showMissionTracker(update);
       this.gameScene.setMissionBeacon(update.beacon);
+      this.gameScene.tutorial.notify('accept');
     });
 
     this.socket.on('missionCompleted', (data) => {
@@ -458,6 +466,9 @@ export class NetworkSystem {
             this.gameScene.localPlayer.setPosition(response.position);
           }
         }
+
+        // Brand-new character = brand-new player: start the tutorial
+        this.gameScene.tutorial.start();
 
         this.gameScene.hud.closeFactionSelection();
       } else {
