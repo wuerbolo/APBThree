@@ -508,8 +508,10 @@ export class NetworkSystem {
     });
   }
 
-  equipCosmetic(cosmeticId) {
-    this.socket.emit('equipCosmetic', cosmeticId, (response) => {
+  // id + slot=null equips (server derives the slot from its catalog);
+  // id=null + slot clears that slot.
+  equipCosmetic(cosmeticId, slot) {
+    this.socket.emit('equipCosmetic', { id: cosmeticId, slot }, (response) => {
       if (response && response.success) {
         this.gameScene.character = response.character;
         if (this.gameScene.localPlayer) {

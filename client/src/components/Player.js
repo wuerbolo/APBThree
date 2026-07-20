@@ -235,7 +235,7 @@ export class Player {
   }
 
   getFactionColor() {
-    return resolveFactionColor(this.character?.faction, this.isLocal);
+    return resolveFactionColor(this.character?.faction, this.isLocal, this.character?.equippedBodyColor);
   }
 
   // Sets/updates this player's character data and recolors the mesh to
@@ -280,7 +280,9 @@ export class Player {
     ctx.textBaseline = 'middle';
     ctx.lineWidth = 8;
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
-    ctx.fillStyle = `#${this.getFactionColor().toString(16).padStart(6, '0')}`;
+    // Plain faction color on purpose -- not the purchasable body tone --
+    // so the tag stays a reliable friend-or-foe signal.
+    ctx.fillStyle = `#${resolveFactionColor(faction, this.isLocal).toString(16).padStart(6, '0')}`;
     ctx.strokeText(name, canvas.width / 2, canvas.height / 2);
     ctx.fillText(name, canvas.width / 2, canvas.height / 2);
 

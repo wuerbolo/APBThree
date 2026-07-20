@@ -172,14 +172,29 @@ export function resetDeathPose(rig, groundY = 1) {
 
 // --- Cosmetics (hats) ------------------------------------------------------
 
-// Client-side catalog for the shop UI and hat meshes. Prices here are
-// display-only -- the server has the authoritative catalog and validates
-// every purchase.
+// Client-side catalog for the shop UI and hat meshes. Prices/levels here
+// are display-only -- the server has the authoritative catalog and
+// validates every purchase (including the level gates).
 export const COSMETICS = {
-  cap: { name: 'Street Cap', price: 30 },
-  tophat: { name: 'Top Hat', price: 100 },
-  halo: { name: 'Halo', price: 250 }
+  // Hats
+  cap: { slot: 'hat', name: 'Street Cap', desc: 'A classic. Keeps the sun off.', price: 30, minLevel: 1 },
+  beanie: { slot: 'hat', name: 'Beanie', desc: 'Low profile, zero fuss.', price: 60, minLevel: 2 },
+  tophat: { slot: 'hat', name: 'Top Hat', desc: 'For the distinguished operator.', price: 100, minLevel: 3 },
+  cowboy: { slot: 'hat', name: 'Cowboy Hat', desc: 'Earned, not bought. This town ain\'t big enough.', price: 0, minLevel: 4 },
+  halo: { slot: 'hat', name: 'Halo', desc: 'Certified innocent (results may vary).', price: 250, minLevel: 5 },
+  crown: { slot: 'hat', name: 'Crown', desc: 'Heavy is the head.', price: 400, minLevel: 7 },
+  // Body color tones
+  midnight: { slot: 'color', name: 'Midnight Tone', desc: 'A darker shade of your colors.', price: 60, minLevel: 2 },
+  neon: { slot: 'color', name: 'Neon Tone', desc: 'Impossible to miss. That\'s the point.', price: 150, minLevel: 4 },
+  royal: { slot: 'color', name: 'Royal Tone', desc: 'Earned, not bought. Dress like you run this city.', price: 0, minLevel: 6 },
+  // Movement trails
+  ember: { slot: 'trail', name: 'Ember Trail', desc: 'Leave sparks in your wake.', price: 150, minLevel: 3 },
+  frost: { slot: 'trail', name: 'Frost Trail', desc: 'Ice-cold footwork.', price: 200, minLevel: 5 },
+  shadow: { slot: 'trail', name: 'Shadow Trail', desc: 'Earned, not bought. The city whispers your name.', price: 0, minLevel: 8 },
+  rainbow: { slot: 'trail', name: 'Rainbow Trail', desc: 'Full spectrum intimidation.', price: 500, minLevel: 8 }
 };
+
+export const SLOT_LABELS = { hat: 'HATS', color: 'BODY TONES', trail: 'TRAILS' };
 
 export function buildHatMesh(cosmeticId) {
   switch (cosmeticId) {
@@ -212,6 +227,48 @@ export function buildHatMesh(cosmeticId) {
       halo.rotation.x = Math.PI / 2;
       halo.position.y = 0.7;
       return halo;
+    }
+    case 'beanie': {
+      const hat = new THREE.Group();
+      const material = new THREE.MeshStandardMaterial({ color: 0x37474f });
+      const dome = new THREE.Mesh(new THREE.BoxGeometry(1.02, 0.4, 1.02), material);
+      dome.position.y = 0.06;
+      hat.add(dome);
+      const fold = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.16, 1.1), material);
+      fold.position.y = -0.14;
+      hat.add(fold);
+      return hat;
+    }
+    case 'cowboy': {
+      const hat = new THREE.Group();
+      const material = new THREE.MeshStandardMaterial({ color: 0x795548 });
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.5, 8), material);
+      crown.position.y = 0.24;
+      hat.add(crown);
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 0.08, 12), material);
+      brim.position.y = 0;
+      hat.add(brim);
+      const band = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.49, 0.52, 0.12, 8),
+        new THREE.MeshStandardMaterial({ color: 0x3e2723 })
+      );
+      band.position.y = 0.08;
+      hat.add(band);
+      return hat;
+    }
+    case 'crown': {
+      const hat = new THREE.Group();
+      const material = new THREE.MeshStandardMaterial({ color: 0xffc107, metalness: 0.6, roughness: 0.3 });
+      const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.3, 8), material);
+      hat.add(ring);
+      // Four spikes around the ring
+      for (let i = 0; i < 4; i++) {
+        const angle = (i / 4) * Math.PI * 2;
+        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.36, 4), material);
+        spike.position.set(Math.cos(angle) * 0.44, 0.3, Math.sin(angle) * 0.44);
+        hat.add(spike);
+      }
+      return hat;
     }
     default:
       return null;

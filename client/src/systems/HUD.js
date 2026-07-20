@@ -1,5 +1,5 @@
 import { getFactionDisplayName } from '../utils/factionColors.js';
-import { COSMETICS } from '../utils/characterModel.js';
+import { COSMETICS, SLOT_LABELS } from '../utils/characterModel.js';
 
 export class HUD {
     constructor(gameScene) {
@@ -1481,7 +1481,9 @@ export class HUD {
             border: 2px solid #ff9800;
             font-family: Arial, sans-serif;
             z-index: 1100;
-            min-width: 320px;
+            min-width: 340px;
+            max-height: 82vh;
+            overflow-y: auto;
         `;
         document.body.appendChild(overlay);
         this.renderShop(character);
@@ -1492,9 +1494,15 @@ export class HUD {
         if (!overlay) return;
 
         const money = character ? character.money : 0;
+        const level = (character && character.level) || 1;
         const ownedWeapons = (character && character.weapons) || [];
         const cosmetics = (character && character.cosmetics) || [];
-        const equipped = character ? character.equippedCosmetic : null;
+        // What's worn per slot (hat kept its legacy field name)
+        const equippedBySlot = {
+            hat: character ? character.equippedCosmetic : null,
+            color: character ? character.equippedBodyColor : null,
+            trail: character ? character.equippedTrail : null
+        };
 
         const buyButtonStyle = 'padding: 6px 14px; background: #ff9800; color: #111; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;';
         const equipButtonStyle = 'padding: 6px 14px; background: #455a64; color: #fff; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;';
@@ -1522,30 +1530,47 @@ export class HUD {
 
         const cosmeticRow = (id, item) => {
             const owned = cosmetics.includes(id);
-            const isEquipped = equipped === id;
+            const isEquipped = equippedBySlot[item.slot] === id;
+            const locked = !owned && level < item.minLevel;
             let action;
-            if (!owned) {
-                action = `<button data-buy-cosmetic="${id}" style="${buyButtonStyle}">Buy $${item.price}</button>`;
+            if (locked) {
+                action = `<span style="color: #90a4ae; font-size: 12px; font-weight: bold;">🔒 Level ${item.minLevel}</span>`;
+            } else if (!owned) {
+                action = item.price === 0
+                    ? `<button data-buy-cosmetic="${id}" style="${buyButtonStyle}">Claim (free)</button>`
+                    : `<button data-buy-cosmetic="${id}" style="${buyButtonStyle}">Buy $${item.price}</button>`;
             } else if (isEquipped) {
-                action = `<button data-equip-cosmetic="none" style="${equipButtonStyle}">Unequip</button>`;
+                action = `<button data-unequip-slot="${item.slot}" style="${equipButtonStyle}">Unequip</button>`;
             } else {
                 action = `<button data-equip-cosmetic="${id}" style="${equipButtonStyle}">Equip</button>`;
             }
             return `
-                <div style="display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 8px 10px; background: rgba(255,255,255,0.06); border-radius: 5px; margin-top: 6px;">
-                    <div style="font-weight: bold;">${item.name}${isEquipped ? ' <span style="color:#81c784; font-size:11px;">(worn)</span>' : ''}</div>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 8px 10px; background: rgba(255,255,255,0.06); border-radius: 5px; margin-top: 6px;${locked ? ' opacity: 0.55;' : ''}">
+                    <div>
+                        <div style="font-weight: bold;">${item.name}${isEquipped ? ' <span style="color:#81c784; font-size:11px;">(worn)</span>' : ''}</div>
+                        <div style="font-size: 12px; opacity: 0.7;">${item.desc}${!owned && item.minLevel > 1 && !locked ? ` <span style="color:#ffd54f;">(Lv ${item.minLevel})</span>` : ''}</div>
+                    </div>
                     ${action}
                 </div>
             `;
         };
 
+        const cosmeticSection = (slot) => {
+            const entries = Object.entries(COSMETICS).filter(([, item]) => item.slot === slot);
+            return `
+                <div style="font-size: 13px; font-weight: bold; opacity: 0.7; margin: 12px 0 0;">${SLOT_LABELS[slot]}</div>
+                ${entries.map(([id, item]) => cosmeticRow(id, item)).join('')}
+            `;
+        };
+
         overlay.innerHTML = `
             <div style="font-size: 22px; font-weight: bold; color: #ff9800; margin-bottom: 4px;">STORE</div>
-            <div style="opacity: 0.7; margin-bottom: 14px;">Your money: $<span id="shop-money">${money}</span></div>
+            <div style="opacity: 0.7; margin-bottom: 14px;">Your money: $<span id="shop-money">${money}</span> &middot; Level ${level}</div>
             <div style="font-size: 13px; font-weight: bold; opacity: 0.7; margin-bottom: 4px;">WEAPONS</div>
             ${Object.entries(SHOP_WEAPONS).map(([id, item]) => weaponRow(id, item)).join('')}
-            <div style="font-size: 13px; font-weight: bold; opacity: 0.7; margin: 12px 0 0;">COSMETICS</div>
-            ${Object.entries(COSMETICS).map(([id, item]) => cosmeticRow(id, item)).join('')}
+            ${cosmeticSection('hat')}
+            ${cosmeticSection('color')}
+            ${cosmeticSection('trail')}
             <div id="shop-error" style="color: #ff5252; font-size: 13px; min-height: 18px; margin-top: 8px;"></div>
             <div style="opacity: 0.5; font-size: 12px; margin-top: 6px;">Press E to close</div>
         `;
@@ -1557,8 +1582,10 @@ export class HUD {
             btn.onclick = () => this.gameScene.network.buyCosmetic(btn.dataset.buyCosmetic);
         });
         overlay.querySelectorAll('[data-equip-cosmetic]').forEach(btn => {
-            const id = btn.dataset.equipCosmetic;
-            btn.onclick = () => this.gameScene.network.equipCosmetic(id === 'none' ? null : id);
+            btn.onclick = () => this.gameScene.network.equipCosmetic(btn.dataset.equipCosmetic, null);
+        });
+        overlay.querySelectorAll('[data-unequip-slot]').forEach(btn => {
+            btn.onclick = () => this.gameScene.network.equipCosmetic(null, btn.dataset.unequipSlot);
         });
     }
 

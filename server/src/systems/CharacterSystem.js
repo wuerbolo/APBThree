@@ -51,6 +51,8 @@ export class CharacterSystem {
             weapons: character.weapons,
             cosmetics: character.cosmetics,
             equippedCosmetic: character.equippedCosmetic,
+            equippedBodyColor: character.equippedBodyColor,
+            equippedTrail: character.equippedTrail,
             lastLoginDay: character.lastLoginDay,
             loginStreak: character.loginStreak,
             lastDailyMissionDay: character.lastDailyMissionDay

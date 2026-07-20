@@ -6,8 +6,10 @@ export class CharacterModel {
     this.reputation = 0;
     this.money = 0;
     this.weapons = ['pistol'];
-    this.cosmetics = [];          // owned cosmetic ids
-    this.equippedCosmetic = null; // currently worn, or null
+    this.cosmetics = [];          // owned cosmetic ids (all slots mixed)
+    this.equippedCosmetic = null; // hat slot (legacy name, saved data uses it)
+    this.equippedBodyColor = null; // body color tone slot
+    this.equippedTrail = null;     // movement trail slot
 
     // Daily comeback loop (all day keys are UTC YYYY-MM-DD):
     this.lastLoginDay = null;        // last day the login bonus was claimed
@@ -50,6 +52,8 @@ export class CharacterModel {
       weapons: this.weapons,
       cosmetics: this.cosmetics,
       equippedCosmetic: this.equippedCosmetic,
+      equippedBodyColor: this.equippedBodyColor,
+      equippedTrail: this.equippedTrail,
       loginStreak: this.loginStreak,
       reputationForNextLevel: this.getReputationForLevel(this.level + 1)
     };
@@ -65,6 +69,8 @@ export class CharacterModel {
     if (Array.isArray(data.weapons)) this.weapons = data.weapons;
     if (Array.isArray(data.cosmetics)) this.cosmetics = data.cosmetics;
     if (data.equippedCosmetic !== undefined) this.equippedCosmetic = data.equippedCosmetic;
+    if (data.equippedBodyColor !== undefined) this.equippedBodyColor = data.equippedBodyColor;
+    if (data.equippedTrail !== undefined) this.equippedTrail = data.equippedTrail;
     if (data.lastLoginDay !== undefined) this.lastLoginDay = data.lastLoginDay;
     if (data.loginStreak !== undefined) this.loginStreak = data.loginStreak;
     if (data.lastDailyMissionDay !== undefined) this.lastDailyMissionDay = data.lastDailyMissionDay;

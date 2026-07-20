@@ -12,11 +12,22 @@ export const FACTION_COLORS = {
 
 export const DEAD_COLOR = 0x333333;
 
+// Purchasable body color tones. Each stays inside its faction's hue
+// family (warm for Criminals, cool for Enforcers) so an enemy is still
+// recognizable at a glance no matter what tone they bought.
+export const BODY_COLOR_VARIANTS = {
+  midnight: { Criminal: 0x7b1512, Enforcer: 0x0f3572, Civilian: 0x1c5220 },
+  neon: { Criminal: 0xff2952, Enforcer: 0x00b3ff, Civilian: 0x2bff88 },
+  royal: { Criminal: 0xff7043, Enforcer: 0x7c4dff, Civilian: 0xaeea00 },
+};
+
 // Before a player has picked a faction (mesh is hidden during that window
 // anyway, but keep this sane rather than undefined).
 const UNASSIGNED = { base: 0xff0000, own: 0x00ff00 };
 
-export function getFactionColor(faction, isOwn = false) {
+export function getFactionColor(faction, isOwn = false, bodyColorId = null) {
+  const variant = bodyColorId && BODY_COLOR_VARIANTS[bodyColorId];
+  if (variant && variant[faction]) return variant[faction];
   const entry = FACTION_COLORS[faction] || UNASSIGNED;
   return isOwn ? entry.own : entry.base;
 }

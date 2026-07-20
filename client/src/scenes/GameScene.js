@@ -569,6 +569,70 @@ export class GameScene {
     return sprite;
   }
 
+  // --- Cosmetic movement trails --------------------------------------------
+  // Small fading puffs dropped behind anyone (local or remote) with a
+  // trail cosmetic equipped. Purely visual and client-side: each client
+  // spawns them from everyone's synced character data, so all viewers see
+  // the same look without any extra network traffic.
+  updateTrails() {
+    if (!this.trailParticles) {
+      this.trailParticles = [];
+      this._trailGeometry = new THREE.SphereGeometry(0.16, 6, 6);
+    }
+
+    const TRAIL_COLORS = { ember: 0xff7043, frost: 0x80d8ff, shadow: 0x37474f };
+
+    const spawnFor = (player) => {
+      const trailId = player.character && player.character.equippedTrail;
+      if (!trailId || !player.isAlive) return;
+      const pos = player.mesh.position;
+      if (!player._lastTrailPos) player._lastTrailPos = pos.clone();
+      const dx = pos.x - player._lastTrailPos.x;
+      const dz = pos.z - player._lastTrailPos.z;
+      if (dx * dx + dz * dz < 0.8 * 0.8) return; // drop a puff every ~0.8 units
+      player._lastTrailPos.copy(pos);
+
+      const color = trailId === 'rainbow'
+        ? new THREE.Color().setHSL((performance.now() / 1500) % 1, 1, 0.55)
+        : new THREE.Color(TRAIL_COLORS[trailId] || 0xffffff);
+      const puff = new THREE.Mesh(
+        this._trailGeometry,
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false })
+      );
+      puff.position.set(pos.x, pos.y - 0.65, pos.z); // at the feet, follows jumps
+      this.scene.add(puff);
+      this.trailParticles.push({ mesh: puff, bornAt: performance.now() });
+
+      // Hard cap so a crowded lobby can't flood the scene with meshes
+      if (this.trailParticles.length > 240) {
+        const oldest = this.trailParticles.shift();
+        this.scene.remove(oldest.mesh);
+        oldest.mesh.material.dispose();
+      }
+    };
+
+    if (this.localPlayer) spawnFor(this.localPlayer);
+    this.remotePlayers.forEach(spawnFor);
+
+    // Age out: fade + shrink over ~0.9s
+    const now = performance.now();
+    const LIFETIME = 900;
+    for (let i = this.trailParticles.length - 1; i >= 0; i--) {
+      const particle = this.trailParticles[i];
+      const age = now - particle.bornAt;
+      if (age >= LIFETIME) {
+        this.scene.remove(particle.mesh);
+        particle.mesh.material.dispose();
+        this.trailParticles.splice(i, 1);
+      } else {
+        const life = 1 - age / LIFETIME;
+        particle.mesh.material.opacity = 0.85 * life;
+        const scale = 0.5 + 0.5 * life;
+        particle.mesh.scale.set(scale, scale, scale);
+      }
+    }
+  }
+
   setupEventListeners() {
     // Mouse controls
     this.renderer.domElement.addEventListener('click', () => {
@@ -1204,6 +1268,9 @@ export class GameScene {
       player.updateHealthBarRotation(this.camera);
       player.updateGunRecoil();
     });
+
+    // Cosmetic movement trails (local + remote)
+    this.updateTrails();
 
     // Update projectiles
     const now = Date.now();

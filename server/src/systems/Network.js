@@ -25,10 +25,35 @@ const WEAPON_CATALOG = {
   smg: { price: 120 },
   sniper: { price: 200 }
 };
+// Cosmetics: three slots (hat / body color tone / movement trail), each
+// gated by level. price 0 + minLevel N = a free unlock you claim at the
+// store once you've earned the level. Mirrored (display metadata only)
+// in client/src/utils/characterModel.js -- this copy is authoritative
+// for price, level and slot.
 const COSMETIC_CATALOG = {
-  cap: { price: 30 },
-  tophat: { price: 100 },
-  halo: { price: 250 }
+  // Hats
+  cap: { slot: 'hat', price: 30, minLevel: 1 },
+  beanie: { slot: 'hat', price: 60, minLevel: 2 },
+  tophat: { slot: 'hat', price: 100, minLevel: 3 },
+  cowboy: { slot: 'hat', price: 0, minLevel: 4 },
+  halo: { slot: 'hat', price: 250, minLevel: 5 },
+  crown: { slot: 'hat', price: 400, minLevel: 7 },
+  // Body color tones (per-faction shades, resolved client-side)
+  midnight: { slot: 'color', price: 60, minLevel: 2 },
+  neon: { slot: 'color', price: 150, minLevel: 4 },
+  royal: { slot: 'color', price: 0, minLevel: 6 },
+  // Movement trails
+  ember: { slot: 'trail', price: 150, minLevel: 3 },
+  frost: { slot: 'trail', price: 200, minLevel: 5 },
+  shadow: { slot: 'trail', price: 0, minLevel: 8 },
+  rainbow: { slot: 'trail', price: 500, minLevel: 8 }
+};
+// equippedCosmetic keeps its legacy name for the hat slot (saved
+// characters already use it); the other two slots got real names.
+const SLOT_FIELDS = {
+  hat: 'equippedCosmetic',
+  color: 'equippedBodyColor',
+  trail: 'equippedTrail'
 };
 const STORE_BUY_RADIUS = 15;
 
@@ -912,6 +937,12 @@ export class NetworkSystem {
         const character = player.getCharacter();
         if (character.hasCosmetic(cosmeticId)) return respond({ success: false, error: 'Already owned' });
 
+        // Level gate -- free unlocks are still "bought" here (at $0), so
+        // this is the single enforcement point for earned cosmetics too.
+        if (character.level < item.minLevel) {
+          return respond({ success: false, error: `Requires level ${item.minLevel}` });
+        }
+
         const store = BUILDINGS.find(b => b.label === 'STORE');
         const dx = player.position.x - store.x;
         const dz = player.position.z - store.z;
@@ -923,7 +954,7 @@ export class NetworkSystem {
 
         character.money -= item.price;
         character.cosmetics.push(cosmeticId);
-        character.equippedCosmetic = cosmeticId;
+        character[SLOT_FIELDS[item.slot]] = cosmeticId; // auto-equip in its slot
         this.characterSystem.save();
         console.log(`Player ${socket.id} bought cosmetic ${cosmeticId} for $${item.price}`);
 
@@ -932,20 +963,29 @@ export class NetworkSystem {
         respond({ success: true, character: character.getData() });
       });
 
-      // Handle equipping/unequipping an owned cosmetic (null = bare head).
-      // No store proximity needed -- you own it, wear it anywhere.
-      socket.on('equipCosmetic', (cosmeticId, callback) => {
+      // Handle equipping/unequipping an owned cosmetic. Payload is
+      // { id, slot }: id null clears the given slot, otherwise the slot
+      // comes from the catalog. No store proximity needed -- you own it,
+      // wear it anywhere.
+      socket.on('equipCosmetic', (payload, callback) => {
         const respond = (result) => { if (typeof callback === 'function') callback(result); };
 
         const player = this.players.get(socket.id);
         if (!player || !player.hasCharacter()) return respond({ success: false, error: 'No character' });
 
+        const { id, slot } = payload || {};
         const character = player.getCharacter();
-        if (cosmeticId !== null && !character.hasCosmetic(cosmeticId)) {
-          return respond({ success: false, error: 'Not owned' });
-        }
 
-        character.equippedCosmetic = cosmeticId;
+        if (id === null || id === undefined) {
+          const field = SLOT_FIELDS[slot];
+          if (!field) return respond({ success: false, error: 'Unknown slot' });
+          character[field] = null;
+        } else {
+          const item = COSMETIC_CATALOG[id];
+          if (!item) return respond({ success: false, error: 'Unknown cosmetic' });
+          if (!character.hasCosmetic(id)) return respond({ success: false, error: 'Not owned' });
+          character[SLOT_FIELDS[item.slot]] = id;
+        }
         this.characterSystem.save();
 
         socket.broadcast.emit('playerUpdated', { id: socket.id, character: character.getData() });
