@@ -42,6 +42,18 @@ export class NetworkSystem {
       console.log('Disconnected from server:', reason);
     });
 
+    // Admin actions against this player. Both arrive right before the
+    // server closes the socket ('io server disconnect', which socket.io
+    // does not auto-reconnect from), so the overlay is terminal until the
+    // player refreshes -- and a banned player just gets it again.
+    this.socket.on('kicked', () => {
+      this.gameScene.hud.showDisconnectScreen('KICKED', 'An admin removed you from the server.');
+    });
+
+    this.socket.on('banned', ({ reason }) => {
+      this.gameScene.hud.showDisconnectScreen('BANNED', reason || 'You are banned from this server.');
+    });
+
     this.setupSocketHandlers();
   }
 

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>B.O.L.O admin</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #14161c;
+      color: #dfe3ea;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      padding: 24px;
+    }
+    h1 { font-size: 20px; margin: 0 0 20px; letter-spacing: 2px; }
+    h1 .dot { color: #f4b73f; }
+    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: #8b93a5; margin: 28px 0 10px; }
+    table { border-collapse: collapse; width: 100%; max-width: 1100px; font-size: 13px; }
+    th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid #262a35; }
+    th { color: #8b93a5; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+    tr:hover td { background: #1b1e27; }
+    .faction-Criminal { color: #ff6b6b; }
+    .faction-Enforcer { color: #6bb2ff; }
+    .muted { color: #626b7d; }
+    .mono { font-family: Consolas, monospace; font-size: 12px; }
+    button {
+      background: #262a35; color: #dfe3ea; border: 1px solid #3a4050;
+      border-radius: 4px; padding: 4px 12px; margin-right: 6px;
+      cursor: pointer; font-size: 12px;
+    }
+    button:hover { background: #323848; }
+    button.danger { border-color: #7a3040; color: #ff8f9a; }
+    button.danger:hover { background: #3d222a; }
+    #login {
+      max-width: 320px; margin: 15vh auto; text-align: center;
+    }
+    #login input {
+      width: 100%; padding: 10px; background: #1b1e27; color: #dfe3ea;
+      border: 1px solid #3a4050; border-radius: 4px; font-size: 14px; margin-bottom: 10px;
+    }
+    #login button { width: 100%; padding: 10px; font-size: 14px; }
+    #login .error { color: #ff8f9a; font-size: 13px; min-height: 18px; margin-top: 8px; }
+    #panel { display: none; }
+    .empty { color: #626b7d; font-style: italic; padding: 10px 12px; }
+    #status { position: fixed; top: 16px; right: 20px; font-size: 12px; color: #626b7d; }
+  </style>
+</head>
+<body>
+  <div id="login">
+    <h1>B<span class="dot">.</span>O<span class="dot">.</span>L<span class="dot">.</span>O admin</h1>
+    <input id="secret" type="password" placeholder="Admin secret" autofocus>
+    <button onclick="doLogin()">Enter</button>
+    <div class="error" id="login-error"></div>
+  </div>
+
+  <div id="panel">
+    <h1>B<span class="dot">.</span>O<span class="dot">.</span>L<span class="dot">.</span>O admin</h1>
+    <div id="status"></div>
+
+    <h2>Online players</h2>
+    <table>
+      <thead><tr>
+        <th>Name</th><th>Faction</th><th>Lvl</th><th>$</th><th>IP</th><th>Token</th><th>Session</th><th></th>
+      </tr></thead>
+      <tbody id="players"></tbody>
+    </table>
+
+    <h2>Bans</h2>
+    <table>
+      <thead><tr>
+        <th>Name</th><th>Token</th><th>IP</th><th>Reason</th><th>Banned at</th><th></th>
+      </tr></thead>
+      <tbody id="bans"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    async function api(path, body) {
+      const res = await fetch('/admin/api/' + path, body === undefined
+        ? undefined
+        : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (res.status === 401) { showLogin(); throw new Error('unauthorized'); }
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+      return res.json();
+    }
+
+    function showLogin() {
+      $('panel').style.display = 'none';
+      $('login').style.display = 'block';
+    }
+
+    function showPanel() {
+      $('login').style.display = 'none';
+      $('panel').style.display = 'block';
+      refresh();
+    }
+
+    async function doLogin() {
+      $('login-error').textContent = '';
+      try {
+        await api('login', { secret: $('secret').value });
+        $('secret').value = '';
+        showPanel();
+      } catch (e) {
+        $('login-error').textContent = e.message === 'unauthorized' ? 'Wrong secret' : e.message;
+      }
+    }
+    $('secret').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function sessionTime(ms) {
+      const s = Math.floor(ms / 1000);
+      if (s < 60) return s + 's';
+      if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+      return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+    }
+
+    async function refresh() {
+      try {
+        const [players, bans] = await Promise.all([api('players'), api('bans')]);
+
+        $('players').innerHTML = players.length ? players.map((p) => `
+          <tr>
+            <td>${esc(p.name) || '<span class="muted">(no character)</span>'}</td>
+            <td class="faction-${esc(p.faction)}">${esc(p.faction) || '-'}</td>
+            <td>${p.level ?? '-'}</td>
+            <td>${p.money ?? '-'}</td>
+            <td class="mono">${esc(p.ip)}</td>
+            <td class="mono" title="${esc(p.token)}">${esc(p.token).slice(0, 12)}&hellip;</td>
+            <td>${sessionTime(Date.now() - p.connectedAt)}</td>
+            <td>
+              <button onclick="kick('${esc(p.socketId)}', '${esc(p.name)}')">Kick</button>
+              <button class="danger" onclick="ban('${esc(p.socketId)}', '${esc(p.name)}')">Ban</button>
+            </td>
+          </tr>`).join('') : '<tr><td colspan="8" class="empty">Nobody online</td></tr>';
+
+        $('bans').innerHTML = bans.length ? bans.map((b) => `
+          <tr>
+            <td>${esc(b.name) || '<span class="muted">?</span>'}</td>
+            <td class="mono" title="${esc(b.token)}">${esc(b.token).slice(0, 12)}&hellip;</td>
+            <td class="mono">${esc(b.ip) || '-'}</td>
+            <td>${esc(b.reason) || '<span class="muted">-</span>'}</td>
+            <td>${new Date(b.bannedAt).toLocaleString()}</td>
+            <td><button onclick="unban('${esc(b.token)}')">Unban</button></td>
+          </tr>`).join('') : '<tr><td colspan="6" class="empty">No bans</td></tr>';
+
+        $('status').textContent = 'Updated ' + new Date().toLocaleTimeString();
+      } catch (e) {
+        if (e.message !== 'unauthorized') $('status').textContent = 'Error: ' + e.message;
+      }
+    }
+
+    async function kick(socketId, name) {
+      if (!confirm(`Kick ${name || socketId}?`)) return;
+      await api('kick', { socketId });
+      refresh();
+    }
+
+    async function ban(socketId, name) {
+      const reason = prompt(`Ban ${name || socketId} -- reason (optional):`);
+      if (reason === null) return;
+      await api('ban', { socketId, reason });
+      refresh();
+    }
+
+    async function unban(token) {
+      if (!confirm('Remove this ban?')) return;
+      await api('unban', { token });
+      refresh();
+    }
+
+    // If the session cookie is already set, the first players fetch
+    // succeeds and we land straight in the panel.
+    api('players').then(showPanel).catch(() => {});
+    setInterval(() => {
+      if ($('panel').style.display === 'block') refresh();
+    }, 5000);
+  </script>
+</body>
+</html>

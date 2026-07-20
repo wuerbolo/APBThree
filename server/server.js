@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import path from 'path';
 import { NetworkSystem } from './src/systems/Network.js';
+import { registerAdminRoutes } from './src/admin/routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -25,6 +26,9 @@ app.get('/metrics', (req, res) => {
   }
   res.json(network.metricsSystem.getSummary(30));
 });
+
+// Admin panel: view/kick/ban players. Gated by ADMIN_SECRET (disabled if unset).
+registerAdminRoutes(app, network);
 
 // Serve the built client (see client/vite.config.js outDir)
 app.use(express.static(path.join(__dirname, '../client/dist')));

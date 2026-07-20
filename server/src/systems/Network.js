@@ -3,6 +3,7 @@ import { PlayerModel } from '../models/PlayerModel.js';
 import { NPCSpawner } from './NPCSpawner.js';
 import { CharacterSystem } from './CharacterSystem.js';
 import { MetricsSystem } from './MetricsSystem.js';
+import { BanSystem } from './BanSystem.js';
 import { MissionSystem } from './MissionSystem.js';
 import { RoundSystem } from './RoundSystem.js';
 import { ScoreSystem } from './ScoreSystem.js';
@@ -113,6 +114,10 @@ export class NetworkSystem {
 
     // Sessions/duration/D1 retention -- see server/src/systems/MetricsSystem.js
     this.metricsSystem = new MetricsSystem();
+
+    // Persistent token+IP ban list, enforced at connection time and
+    // managed from the /admin panel (see server/src/admin/routes.js)
+    this.banSystem = new BanSystem();
 
     // Faction missions (multi-stage jobs with rewards)
     this.missionSystem = new MissionSystem(this);
@@ -276,6 +281,16 @@ export class NetworkSystem {
       // your character survives refreshes and server restarts.
       const playerKey = String((socket.handshake.auth && socket.handshake.auth.token) || socket.id).slice(0, 64);
 
+      // Banned players are rejected before anything is set up for them --
+      // before metrics too, so ban-retry spam doesn't inflate session counts.
+      const banEntry = this.banSystem.isBanned(playerKey, clientIp);
+      if (banEntry) {
+        console.log(`Rejected banned player: ${socket.id} from ${clientIp} (banned as "${banEntry.name}")`);
+        socket.emit('banned', { reason: banEntry.reason });
+        socket.disconnect(true);
+        return;
+      }
+
       this.metricsSystem.recordConnect(socket.id, playerKey);
 
       // Check if player has a character
@@ -290,6 +305,9 @@ export class NetworkSystem {
       // Create new player
       const player = new PlayerModel(socket.id, initialPosition);
       player.characterKey = playerKey;
+      // Kept for the admin panel: who's connected from where, since when
+      player.clientIp = clientIp;
+      player.connectedAt = Date.now();
       this.players.set(socket.id, player);
       
       if (existingCharacter) {
@@ -1023,6 +1041,50 @@ export class NetworkSystem {
         this.damageLimiter.clear(socket.id);
       });
     });
+  }
+
+  // --- Admin panel (see server/src/admin/routes.js) -------------------------
+
+  getAdminPlayerList() {
+    return Array.from(this.players.entries()).map(([socketId, player]) => {
+      const character = player.hasCharacter() ? player.getCharacter() : null;
+      return {
+        socketId,
+        name: character ? character.name : null,
+        faction: character ? character.faction : null,
+        level: character ? character.level : null,
+        money: character ? character.money : null,
+        token: player.characterKey,
+        ip: player.clientIp,
+        connectedAt: player.connectedAt
+      };
+    });
+  }
+
+  kickPlayer(socketId) {
+    const socket = this.io.sockets.sockets.get(socketId);
+    if (!socket) return false;
+    socket.emit('kicked', {});
+    socket.disconnect(true);
+    return true;
+  }
+
+  banPlayer(socketId, reason) {
+    const player = this.players.get(socketId);
+    if (!player) return null;
+    const character = player.hasCharacter() ? player.getCharacter() : null;
+    const entry = this.banSystem.ban({
+      token: player.characterKey,
+      ip: player.clientIp,
+      name: character ? character.name : null,
+      reason
+    });
+    const socket = this.io.sockets.sockets.get(socketId);
+    if (socket) {
+      socket.emit('banned', { reason: entry.reason });
+      socket.disconnect(true);
+    }
+    return entry;
   }
 
   // Cash dropped by a killed Civilian, collected by walking over it. Offset

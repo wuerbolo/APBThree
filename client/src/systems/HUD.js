@@ -529,6 +529,50 @@ export class HUD {
     // character creation, needs a name), this just picks a faction on the
     // existing character -- server treats it like a respawn into the new
     // faction's spawn.
+    // Terminal overlay for kick/ban: the server has already closed the
+    // socket (no auto-reconnect), so this sits above everything with no way
+    // to dismiss it -- refreshing is the only way out (and a ban survives
+    // the refresh server-side).
+    showDisconnectScreen(title, message) {
+        if (document.getElementById('disconnect-overlay')) return;
+        if (document.pointerLockElement) document.exitPointerLock();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'disconnect-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.92);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 3000;
+            font-family: Arial, sans-serif;
+        `;
+
+        const heading = document.createElement('h1');
+        heading.textContent = title;
+        heading.style.cssText = `
+            color: #ff5252;
+            font-size: 56px;
+            letter-spacing: 6px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+            margin-bottom: 10px;
+        `;
+
+        const text = document.createElement('div');
+        text.textContent = message;
+        text.style.cssText = `color: #cccccc; font-size: 16px; max-width: 480px; text-align: center;`;
+
+        overlay.appendChild(heading);
+        overlay.appendChild(text);
+        document.body.appendChild(overlay);
+    }
+
     showFactionChangeMenu(currentFaction) {
         if (this.isFactionChangeMenuOpen()) return;
         if (document.pointerLockElement) document.exitPointerLock();
