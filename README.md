@@ -54,7 +54,7 @@ external `proxy` network) -- for local testing use plain `docker build` +
 - First-person view with weapon viewmodel, plus a top-down tactical view
   (V key, scroll to zoom).
 - Characters persist across refreshes/restarts (localStorage token +
-  server-side JSON persistence).
+  server-side persistence -- Postgres/Neon in production, JSON files in dev).
 
 ## Architecture notes
 
@@ -63,6 +63,10 @@ external `proxy` network) -- for local testing use plain `docker build` +
   socket.io on both ends; the server file holds all game event handlers
 - `server/src/systems/NPCSpawner.js` -- keeps a minimum population per
   faction alive (players count toward their faction's quota)
+- `server/src/persistence/store.js` -- pluggable storage backend: Postgres
+  (via `DATABASE_URL`, e.g. a Neon connection string) if set, otherwise
+  JSON files under `server/data`. Switching `DATABASE_URL` on auto-migrates
+  any existing JSON data into Postgres the first time the server boots.
 - `*/src/utils/collision.js` -- building layout + AABB collision, mirrored
   between client and server (keep both in sync; no shared package yet)
 

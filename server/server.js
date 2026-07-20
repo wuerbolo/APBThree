@@ -33,8 +33,15 @@ registerAdminRoutes(app, network);
 // Serve the built client (see client/vite.config.js outDir)
 app.use(express.static(path.join(__dirname, '../client/dist')));
 
-// Start server
+// Load persisted state (Postgres or JSON, see src/persistence/store.js)
+// before accepting any connections -- socket handlers reference these
+// systems by the time a real client can reach them, but not before.
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-}); 
+network.init().then(() => {
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}).catch((err) => {
+  console.error('Failed to initialize persistence:', err);
+  process.exit(1);
+});

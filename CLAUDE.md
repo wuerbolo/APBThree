@@ -16,7 +16,8 @@ pnpm preview   # preview the built client
 - client/src/systems/Network.js   - socket.io client
 - client/src/utils/collision.js   - building AABB collision (mirrored in server/src/utils/collision.js -- keep both in sync, no shared package yet)
 - server/src/systems/Network.js   - socket.io server, all game event handlers
-- server/src/models/              - PlayerModel, NPCModel, CharacterModel (in-memory only, no persistence yet)
+- server/src/models/              - PlayerModel, NPCModel, CharacterModel (in-memory, persisted via the store below)
+- server/src/persistence/store.js - pluggable persistence: Postgres (Neon) if DATABASE_URL is set, JSON files under server/data otherwise. CharacterSystem/ScoreSystem/MetricsSystem/BanSystem all load from and debounce-save to it.
 - server/server.js serves the built client via express.static('../client/dist')
 
 ## Task tracking: Trello, not code TODOs
@@ -54,6 +55,11 @@ assuming there's nothing to do next.
 - docker-compose.yml expects an external `proxy` Docker network (for Traefik) --
   `docker compose up` fails without it. For local testing, use `docker build` +
   `docker run` directly instead.
+- No `DATABASE_URL` set -> persistence falls back to JSON files in server/data
+  (fine for local dev). In that mode, server/data MUST be a mounted volume in
+  production or every redeploy wipes all characters -- docker-compose.yml
+  already mounts one. Switching DATABASE_URL on later auto-migrates the
+  existing JSON data into Postgres on first boot (server/src/persistence/store.js).
 - The embedded browser preview's screenshot/computer actions hang on this WebGL
   app in this sandbox (unrelated to app code). Fall back to: console messages,
   DOM read_page/find/click (both work fine), and `node --input-type=module -e`

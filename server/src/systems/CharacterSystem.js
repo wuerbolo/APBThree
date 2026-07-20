@@ -1,45 +1,38 @@
 import { CharacterModel } from '../models/CharacterModel.js';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, '../../data');
-const DATA_FILE = path.join(DATA_DIR, 'characters.json');
 
 export class CharacterSystem {
-  constructor() {
+  constructor(store) {
     // Characters keyed by the client's persistent token (falls back to
     // socket.id for clients that don't send one), so a character survives
     // reconnects and server restarts.
     this.charactersByPlayerId = new Map();
     this.saveTimer = null;
-    this.loadFromDisk();
+    this.store = store;
   }
 
-  loadFromDisk() {
+  // Call once, before accepting connections -- see NetworkSystem.init().
+  async load() {
     try {
-      if (!fs.existsSync(DATA_FILE)) return;
-      const raw = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+      const raw = await this.store.load('characters');
+      if (!raw) return;
       for (const [key, data] of Object.entries(raw)) {
         const character = new CharacterModel(data.name, data.faction);
         character.updateData(data);
         this.charactersByPlayerId.set(key, character);
       }
-      console.log(`Loaded ${this.charactersByPlayerId.size} character(s) from disk`);
+      console.log(`Loaded ${this.charactersByPlayerId.size} character(s) from ${this.store.describe()}`);
     } catch (err) {
-      console.error('Failed to load characters from disk:', err.message);
+      console.error('Failed to load characters:', err.message);
     }
   }
 
   // Debounced write -- kills/pickups can mutate money several times a
-  // second and each individual write is not worth an fsync.
+  // second and each individual write is not worth a round-trip.
   save() {
     if (this.saveTimer) return;
-    this.saveTimer = setTimeout(() => {
+    this.saveTimer = setTimeout(async () => {
       this.saveTimer = null;
       try {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
         const out = {};
         this.charactersByPlayerId.forEach((character, key) => {
           out[key] = {
@@ -58,9 +51,9 @@ export class CharacterSystem {
             lastDailyMissionDay: character.lastDailyMissionDay
           };
         });
-        fs.writeFileSync(DATA_FILE, JSON.stringify(out, null, 2));
+        await this.store.save('characters', out);
       } catch (err) {
-        console.error('Failed to save characters to disk:', err.message);
+        console.error('Failed to save characters:', err.message);
       }
     }, 2000);
   }

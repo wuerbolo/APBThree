@@ -1,46 +1,43 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, '../../data');
-const DATA_FILE = path.join(DATA_DIR, 'bans.json');
-
 // Persistent ban list, keyed by player token, with the IP the player was
 // using when banned. A connection is rejected if EITHER its token or its
 // IP matches an active ban -- clearing localStorage alone (new token) or
-// hopping networks alone (new IP) isn't enough to get back in. Same
-// debounced-JSON-on-disk pattern as CharacterSystem/MetricsSystem.
+// hopping networks alone (new IP) isn't enough to get back in. Persisted
+// via the pluggable store (server/src/persistence/store.js).
 export class BanSystem {
-  constructor() {
+  constructor(store) {
     // token -> { token, ip, name, reason, bannedAt }
     this.bans = new Map();
     this.saveTimer = null;
-    this.loadFromDisk();
+    this.store = store;
   }
 
-  loadFromDisk() {
+  // Call once, before accepting connections -- see NetworkSystem.init().
+  // Accepts both the current { token: entry } shape and the original
+  // bans.json array format, so older data files still load correctly.
+  async load() {
     try {
-      if (!fs.existsSync(DATA_FILE)) return;
-      const raw = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-      for (const entry of raw) {
+      const raw = await this.store.load('bans');
+      if (!raw) return;
+      const entries = Array.isArray(raw) ? raw : Object.values(raw);
+      for (const entry of entries) {
         if (entry && entry.token) this.bans.set(entry.token, entry);
       }
-      console.log(`Loaded ${this.bans.size} ban(s) from disk`);
+      console.log(`Loaded ${this.bans.size} ban(s) from ${this.store.describe()}`);
     } catch (err) {
-      console.error('Failed to load bans from disk:', err.message);
+      console.error('Failed to load bans:', err.message);
     }
   }
 
   save() {
     if (this.saveTimer) return;
-    this.saveTimer = setTimeout(() => {
+    this.saveTimer = setTimeout(async () => {
       this.saveTimer = null;
       try {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-        fs.writeFileSync(DATA_FILE, JSON.stringify(Array.from(this.bans.values()), null, 2));
+        const out = {};
+        this.bans.forEach((entry, token) => { out[token] = entry; });
+        await this.store.save('bans', out);
       } catch (err) {
-        console.error('Failed to save bans to disk:', err.message);
+        console.error('Failed to save bans:', err.message);
       }
     }, 2000);
   }

@@ -1,11 +1,3 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, '../../data');
-const DATA_FILE = path.join(DATA_DIR, 'metrics.json');
-
 function todayKey() {
   return new Date().toISOString().slice(0, 10); // YYYY-MM-DD, server-local UTC day
 }
@@ -18,23 +10,24 @@ function yesterdayKey() {
 
 // Tracks, per UTC day: unique player tokens seen, session count, total
 // session duration (for the average), and how many of today's tokens were
-// also seen yesterday (D1 retention). Same debounced-JSON-on-disk pattern
-// as CharacterSystem -- no database needed for numbers this small.
+// also seen yesterday (D1 retention). Persisted via the pluggable store
+// (server/src/persistence/store.js) -- one row per day.
 export class MetricsSystem {
-  constructor() {
+  constructor(store) {
     // date -> { tokens: string[], sessionCount, totalDurationMs, returningFromYesterday }
     this.days = new Map();
     // socket.id -> { token, connectedAt } -- lets recordDisconnect compute
     // a duration without the caller having to pass the token back in.
     this.activeSessions = new Map();
     this.saveTimer = null;
-    this.loadFromDisk();
+    this.store = store;
   }
 
-  loadFromDisk() {
+  // Call once, before accepting connections -- see NetworkSystem.init().
+  async load() {
     try {
-      if (!fs.existsSync(DATA_FILE)) return;
-      const raw = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+      const raw = await this.store.load('metrics');
+      if (!raw) return;
       for (const [date, day] of Object.entries(raw)) {
         this.days.set(date, {
           tokens: new Set(day.tokens || []),
@@ -43,18 +36,17 @@ export class MetricsSystem {
           returningFromYesterday: day.returningFromYesterday || 0
         });
       }
-      console.log(`Loaded metrics for ${this.days.size} day(s) from disk`);
+      console.log(`Loaded metrics for ${this.days.size} day(s) from ${this.store.describe()}`);
     } catch (err) {
-      console.error('Failed to load metrics from disk:', err.message);
+      console.error('Failed to load metrics:', err.message);
     }
   }
 
   save() {
     if (this.saveTimer) return;
-    this.saveTimer = setTimeout(() => {
+    this.saveTimer = setTimeout(async () => {
       this.saveTimer = null;
       try {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
         const out = {};
         this.days.forEach((day, date) => {
           out[date] = {
@@ -64,9 +56,9 @@ export class MetricsSystem {
             returningFromYesterday: day.returningFromYesterday
           };
         });
-        fs.writeFileSync(DATA_FILE, JSON.stringify(out, null, 2));
+        await this.store.save('metrics', out);
       } catch (err) {
-        console.error('Failed to save metrics to disk:', err.message);
+        console.error('Failed to save metrics:', err.message);
       }
     }, 2000);
   }

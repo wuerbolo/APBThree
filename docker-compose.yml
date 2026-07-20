@@ -9,6 +9,14 @@ services:
     environment:
       PORT: 3000
       CLIENT_ORIGIN: ${CLIENT_ORIGIN:-http://localhost:5173}
+      # Postgres (Neon) if set, else JSON files under server/data -- see
+      # server/src/persistence/store.js. Leave unset for local testing.
+      DATABASE_URL: ${DATABASE_URL:-}
+    volumes:
+      # Safety net for the JSON fallback (and a local cold-backup even in
+      # Postgres mode) -- without this, recreating the container wipes
+      # server/data since it's not baked into the image.
+      - bolo-data:/app/server/data
     networks:
       - proxy
     labels:
@@ -21,3 +29,6 @@ services:
 networks:
   proxy:
     external: true
+
+volumes:
+  bolo-data:

@@ -1,11 +1,4 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { dayKey, isoWeekKey, yearKey } from '../utils/timeBuckets.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, '../../data');
-const DATA_FILE = path.join(DATA_DIR, 'scores.json');
 
 const BUCKET_KEYS = { day: dayKey, week: isoWeekKey, year: yearKey };
 // How many past buckets to keep per period when pruning on save.
@@ -15,22 +8,25 @@ const KEEP_BUCKETS = { day: 8, week: 6, year: 3 };
 // leaderboard can rank activity within a period (including offline players).
 // Only positive reputation deltas are recorded -- see awardReputation.
 export class ScoreSystem {
-  constructor() {
+  constructor(store) {
     // period -> bucketKey -> playerKey -> { name, faction, score }
     this.scores = { day: {}, week: {}, year: {} };
     this.saveTimer = null;
-    this.loadFromDisk();
+    this.store = store;
   }
 
-  loadFromDisk() {
+  // Call once, before accepting connections -- see NetworkSystem.init().
+  // The 'scores' collection is keyed by period ('day'/'week'/'year'), one
+  // row per period holding its full bucket structure.
+  async load() {
     try {
-      if (!fs.existsSync(DATA_FILE)) return;
-      const raw = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+      const raw = await this.store.load('scores');
+      if (!raw) return;
       for (const period of Object.keys(this.scores)) {
         if (raw[period]) this.scores[period] = raw[period];
       }
     } catch (err) {
-      console.error('Failed to load scores from disk:', err.message);
+      console.error('Failed to load scores:', err.message);
     }
   }
 
@@ -73,14 +69,13 @@ export class ScoreSystem {
   // Debounced write, same pattern as CharacterSystem.
   save() {
     if (this.saveTimer) return;
-    this.saveTimer = setTimeout(() => {
+    this.saveTimer = setTimeout(async () => {
       this.saveTimer = null;
       try {
         this.prune();
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-        fs.writeFileSync(DATA_FILE, JSON.stringify(this.scores, null, 2));
+        await this.store.save('scores', this.scores);
       } catch (err) {
-        console.error('Failed to save scores to disk:', err.message);
+        console.error('Failed to save scores:', err.message);
       }
     }, 2000);
   }

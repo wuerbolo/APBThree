@@ -11,6 +11,7 @@ import { RateLimiter } from '../utils/RateLimiter.js';
 import { getSpawnPositionForFaction, BUILDINGS, JAIL, MISSION_CONTACTS, CONTACT_INTERACT_RADIUS, WORLD_HALF } from '../utils/collision.js';
 import { validateCharacterName, containsProfanity } from '../utils/nameValidation.js';
 import { dayKey } from '../utils/timeBuckets.js';
+import { createStore } from '../persistence/store.js';
 import * as THREE from 'three';
 
 function getClientIp(socket) {
@@ -152,21 +153,27 @@ export class NetworkSystem {
     // Chat: enough for a conversation, not enough to flood the screen
     this.chatLimiter = new RateLimiter(5, 5000);
 
+    // Persistence backend: Postgres (Neon) if DATABASE_URL is set, JSON
+    // files under server/data otherwise -- see server/src/persistence/store.js.
+    // Data itself is loaded in init(), which the caller must await before
+    // the HTTP server starts listening (see server.js).
+    this.store = createStore();
+
     // Initialize character system
-    this.characterSystem = new CharacterSystem();
+    this.characterSystem = new CharacterSystem(this.store);
 
     // Sessions/duration/D1 retention -- see server/src/systems/MetricsSystem.js
-    this.metricsSystem = new MetricsSystem();
+    this.metricsSystem = new MetricsSystem(this.store);
 
     // Persistent token+IP ban list, enforced at connection time and
     // managed from the /admin panel (see server/src/admin/routes.js)
-    this.banSystem = new BanSystem();
+    this.banSystem = new BanSystem(this.store);
 
     // Faction missions (multi-stage jobs with rewards)
     this.missionSystem = new MissionSystem(this);
 
     // Day/week/year reputation scoreboards + 3-minute faction rounds
-    this.scoreSystem = new ScoreSystem();
+    this.scoreSystem = new ScoreSystem(this.store);
     this.roundSystem = new RoundSystem(this);
     this.roundSystem.start();
 
@@ -194,6 +201,20 @@ export class NetworkSystem {
 
     // WANTED stars cool off over time
     setInterval(() => this.decayWanted(), 15000);
+  }
+
+  // Loads all persisted state. The constructor only wires sockets/timers
+  // (no connections can land until server.js awaits this and then calls
+  // server.listen()), so it's safe for this to be async.
+  async init() {
+    await this.store.init();
+    await Promise.all([
+      this.characterSystem.load(),
+      this.scoreSystem.load(),
+      this.metricsSystem.load(),
+      this.banSystem.load()
+    ]);
+    console.log(`Persistence backend: ${this.store.describe()}`);
   }
 
   // --- Medkits --------------------------------------------------------------
