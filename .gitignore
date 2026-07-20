@@ -92,3 +92,4 @@ Thumbs.db
 
 # Server runtime persistence
 server/data/
+client/dist/
