@@ -210,6 +210,12 @@ export class NetworkSystem {
       this.gameScene.hud.addChatMessage(data);
     });
 
+    // First login of the (UTC) day: streak bonus toast. The money itself
+    // arrives via the characterUpdated the server sends right after.
+    this.socket.on('loginBonus', ({ streak, bonus }) => {
+      this.gameScene.hud.showLoginBonus(streak, bonus);
+    });
+
     this.socket.on('playerUpdated', ({ id, character }) => {
       // Update remote player's character data (and recolor them to match)
       const remotePlayer = this.gameScene.remotePlayers.get(id);

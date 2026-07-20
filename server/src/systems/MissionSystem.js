@@ -1,4 +1,5 @@
 import { BUILDINGS, WORLD_HALF, resolveBuildingCollision } from '../utils/collision.js';
+import { dayKey } from '../utils/timeBuckets.js';
 
 const ENFORCER_HQ = BUILDINGS.find(b => b.label === 'ENFORCER HQ');
 
@@ -74,6 +75,86 @@ const TEMPLATES = {
   ]
 };
 
+// Daily missions: longer/harder than the regular pool, roughly 3x the
+// reward, completable once per UTC day (tracked on the character, so it
+// survives reconnects). Which one is "today's" is derived from the day
+// key, so every player of a faction gets the same daily.
+const DAILY_TEMPLATES = {
+  Criminal: [
+    {
+      id: 'daily-heist-run',
+      title: 'Heist Run',
+      description: "Today's big score: crack the stash, lose the heat, deliver across town. One shot at the bonus -- don't die holding the bag.",
+      rewardMoney: 180,
+      rewardRep: 60,
+      buildStages: () => {
+        const stash = randomOpenPoint();
+        const heat = randomOpenPoint();
+        const drop = randomOpenPoint();
+        return [
+          { type: 'goto', label: 'Crack the stash', x: stash.x, z: stash.z, radius: 3, package: true },
+          { type: 'goto', label: 'Shake the heat at the safehouse', x: heat.x, z: heat.z, radius: 3 },
+          { type: 'goto', label: 'Deliver the take', x: drop.x, z: drop.z, radius: 3 }
+        ];
+      }
+    },
+    {
+      id: 'daily-purge-patrols',
+      title: 'Purge the Patrols',
+      description: "The day's bounty from the boss: clear serious Enforcer muscle off our streets, then report to the drop.",
+      rewardMoney: 150,
+      rewardRep: 75,
+      buildStages: () => {
+        const drop = randomOpenPoint();
+        return [
+          { type: 'kill', faction: 'Enforcer', count: 5 },
+          { type: 'goto', label: 'Report to the drop point', x: drop.x, z: drop.z, radius: 3 }
+        ];
+      }
+    }
+  ],
+  Enforcer: [
+    {
+      id: 'daily-evidence-chain',
+      title: 'Evidence Chain',
+      description: "Today's priority case: secure evidence at two scenes and log it all back at HQ. The DA wants it airtight.",
+      rewardMoney: 180,
+      rewardRep: 60,
+      buildStages: () => {
+        const sceneA = randomOpenPoint();
+        const sceneB = randomOpenPoint();
+        return [
+          { type: 'goto', label: 'Secure the first scene', x: sceneA.x, z: sceneA.z, radius: 3, package: true },
+          { type: 'goto', label: 'Secure the second scene', x: sceneB.x, z: sceneB.z, radius: 3, package: true },
+          { type: 'goto', label: 'Log the evidence at HQ', x: ENFORCER_HQ.x, z: ENFORCER_HQ.z + 18, radius: 5 }
+        ];
+      }
+    },
+    {
+      id: 'daily-major-sweep',
+      title: 'Major Sweep',
+      description: "The day's directive from the top: a full sweep of Outlaw enforcers, then debrief in the field.",
+      rewardMoney: 150,
+      rewardRep: 75,
+      buildStages: () => {
+        const debrief = randomOpenPoint();
+        return [
+          { type: 'kill', faction: 'Criminal', count: 5 },
+          { type: 'goto', label: 'Reach the field debrief', x: debrief.x, z: debrief.z, radius: 3 }
+        ];
+      }
+    }
+  ]
+};
+
+// Same daily for everyone in a faction: pick from the pool by day key.
+function todaysTemplate(faction, today) {
+  const pool = DAILY_TEMPLATES[faction];
+  if (!pool) return null;
+  const hash = [...today].reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  return pool[hash % pool.length];
+}
+
 export class MissionSystem {
   constructor(networkSystem) {
     this.networkSystem = networkSystem;
@@ -88,16 +169,25 @@ export class MissionSystem {
     const existing = this.missions.get(socketId);
     if (existing) return; // already offered or active
 
-    const templates = TEMPLATES[player.getCharacter().faction];
-    if (!templates) return;
+    const character = player.getCharacter();
 
-    const template = templates[Math.floor(Math.random() * templates.length)];
-    this.missions.set(socketId, { template, state: 'offered' });
+    // The daily takes precedence until it's been completed today; after
+    // that the contact goes back to handing out regular jobs. Failing the
+    // daily doesn't burn it -- only completion does -- so you can retry.
+    const today = dayKey();
+    const isDaily = character.lastDailyMissionDay !== today;
+    const template = isDaily
+      ? todaysTemplate(character.faction, today)
+      : TEMPLATES[character.faction]?.[Math.floor(Math.random() * TEMPLATES[character.faction].length)];
+    if (!template) return;
+
+    this.missions.set(socketId, { template, state: 'offered', isDaily });
     this.networkSystem.io.to(socketId).emit('missionOffer', {
       title: template.title,
       description: template.description,
       rewardMoney: template.rewardMoney,
-      rewardRep: template.rewardRep
+      rewardRep: template.rewardRep,
+      daily: isDaily
     });
   }
 
@@ -155,12 +245,20 @@ export class MissionSystem {
       // Money first so the characterUpdated emitted inside awardReputation
       // carries both rewards in one message.
       character.money += mission.template.rewardMoney;
+
+      // Completing the daily burns it for the rest of the UTC day
+      if (mission.isDaily) {
+        character.lastDailyMissionDay = dayKey();
+        this.networkSystem.characterSystem.save();
+      }
+
       this.networkSystem.awardReputation(socketId, mission.template.rewardRep);
 
       this.networkSystem.io.to(socketId).emit('missionCompleted', {
         title: mission.template.title,
         rewardMoney: mission.template.rewardMoney,
-        rewardRep: mission.template.rewardRep
+        rewardRep: mission.template.rewardRep,
+        daily: !!mission.isDaily
       });
       console.log(`Mission completed by ${socketId}: ${mission.template.title}`);
     }

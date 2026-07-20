@@ -10,6 +10,7 @@ import { ScoreSystem } from './ScoreSystem.js';
 import { RateLimiter } from '../utils/RateLimiter.js';
 import { getSpawnPositionForFaction, BUILDINGS, JAIL, MISSION_CONTACTS, CONTACT_INTERACT_RADIUS, WORLD_HALF } from '../utils/collision.js';
 import { validateCharacterName, containsProfanity } from '../utils/nameValidation.js';
+import { dayKey } from '../utils/timeBuckets.js';
 import * as THREE from 'three';
 
 function getClientIp(socket) {
@@ -49,6 +50,11 @@ const WANTED_BOUNTY_PER_STAR = 30;
 
 const MEDKIT_TARGET_COUNT = 4;
 const MEDKIT_HEAL = 30;
+
+// Login streak: $20 per consecutive day, capped so a months-long streak
+// doesn't turn into a money printer. Day boundaries are UTC (dayKey).
+const LOGIN_BONUS_PER_DAY = 20;
+const LOGIN_STREAK_CAP_DAYS = 7;
 
 const AIRDROP_INTERVAL_MS = 120000;
 const AIRDROP_CLAIM_RADIUS = 2.5;
@@ -345,6 +351,9 @@ export class NetworkSystem {
           hasCharacter: true,
           round: this.roundSystem.getClientState()
         });
+
+        // After init so the client HUD is ready for the streak toast
+        this.claimLoginBonus(socket, existingCharacter);
       } else {
         // Player doesn't have a character, tell client to show creation UI
         socket.emit('init', {
@@ -407,7 +416,8 @@ export class NetworkSystem {
           const t = existing.template;
           socket.emit('missionOffer', {
             title: t.title, description: t.description,
-            rewardMoney: t.rewardMoney, rewardRep: t.rewardRep
+            rewardMoney: t.rewardMoney, rewardRep: t.rewardRep,
+            daily: !!existing.isDaily
           });
           return;
         }
@@ -570,6 +580,9 @@ export class NetworkSystem {
           character: character.getData(),
           position: spawnPosition
         });
+
+        // A brand-new character starts their day-1 login streak right away
+        this.claimLoginBonus(socket, character);
         
         // Broadcast character data to other players
         socket.broadcast.emit('playerUpdated', {
@@ -1069,6 +1082,26 @@ export class NetworkSystem {
         this.chatLimiter.clear(socket.id);
       });
     });
+  }
+
+  // First connection of a (UTC) day: bump or reset the streak and pay the
+  // bonus. Idempotent within a day -- reconnects and refreshes are no-ops.
+  // Called with a character both on returning-player connect and right
+  // after character creation (a brand-new character starts a day-1 streak).
+  claimLoginBonus(socket, character) {
+    const today = dayKey();
+    if (character.lastLoginDay === today) return;
+
+    const yesterday = dayKey(new Date(Date.now() - 86400000));
+    character.loginStreak = character.lastLoginDay === yesterday ? character.loginStreak + 1 : 1;
+    character.lastLoginDay = today;
+
+    const bonus = LOGIN_BONUS_PER_DAY * Math.min(character.loginStreak, LOGIN_STREAK_CAP_DAYS);
+    character.money += bonus;
+    this.characterSystem.save();
+
+    socket.emit('loginBonus', { streak: character.loginStreak, bonus });
+    socket.emit('characterUpdated', character.getData());
   }
 
   // --- Admin panel (see server/src/admin/routes.js) -------------------------

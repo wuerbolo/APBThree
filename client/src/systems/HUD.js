@@ -1306,6 +1306,38 @@ export class HUD {
         }, 4000);
     }
 
+    // First login of the day: golden streak toast under the top HUD.
+    showLoginBonus(streak, bonus) {
+        const toast = document.createElement('div');
+        toast.style.cssText = `
+            position: fixed;
+            top: 14%;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            border: 1px solid #ffd54f;
+            color: #ffd54f;
+            padding: 12px 26px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 18px;
+            font-weight: bold;
+            text-align: center;
+            pointer-events: none;
+            z-index: 1000;
+            transition: opacity 0.8s;
+        `;
+        toast.innerHTML = `
+            DAILY LOGIN BONUS: +$${bonus}
+            <div style="font-size: 13px; font-weight: normal; color: #ffe9a8; margin-top: 4px;">
+                ${streak > 1 ? `${streak}-day streak -- keep it going!` : 'Come back tomorrow to grow your streak'}
+            </div>
+        `;
+        document.body.appendChild(toast);
+        setTimeout(() => { toast.style.opacity = '0'; }, 5000);
+        setTimeout(() => toast.remove(), 6000);
+    }
+
     // --- Missions ----------------------------------------------------------
 
     ensureMissionPanel() {
@@ -1344,8 +1376,11 @@ export class HUD {
         this._pendingMissionOffer = true;
         this._missionActive = false;
         const panel = this.ensureMissionPanel();
+        const header = offer.daily
+            ? `<span style="background: #ffd54f; color: #1a1a1a; padding: 1px 6px; border-radius: 3px; font-size: 12px; margin-right: 6px;">DAILY</span>${offer.title}`
+            : `NEW JOB: ${offer.title}`;
         panel.innerHTML = `
-            <div style="font-weight: bold; color: #ffb74d; margin-bottom: 3px;">NEW JOB: ${offer.title}</div>
+            <div style="font-weight: bold; color: #ffb74d; margin-bottom: 3px;">${header}</div>
             <div style="opacity: 0.85; margin-bottom: 6px;">${offer.description}</div>
             <div style="opacity: 0.7; font-size: 13px;">Reward: $${offer.rewardMoney} + ${offer.rewardRep} rep</div>
             <div style="color: #ffe082; margin-top: 6px; font-weight: bold;">[M] Accept</div>
@@ -1377,8 +1412,9 @@ export class HUD {
 
     showMissionCompleted(data) {
         this.showMissionResult(`
-            <div style="font-weight: bold; color: #81c784; margin-bottom: 3px;">MISSION COMPLETE: ${data.title}</div>
+            <div style="font-weight: bold; color: #81c784; margin-bottom: 3px;">${data.daily ? 'DAILY COMPLETE' : 'MISSION COMPLETE'}: ${data.title}</div>
             <div>+$${data.rewardMoney}, +${data.rewardRep} rep</div>
+            ${data.daily ? '<div style="opacity: 0.7; font-size: 13px; margin-top: 3px;">Come back tomorrow for a new one</div>' : ''}
         `);
     }
 

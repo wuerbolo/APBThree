@@ -50,7 +50,10 @@ export class CharacterSystem {
             money: character.money,
             weapons: character.weapons,
             cosmetics: character.cosmetics,
-            equippedCosmetic: character.equippedCosmetic
+            equippedCosmetic: character.equippedCosmetic,
+            lastLoginDay: character.lastLoginDay,
+            loginStreak: character.loginStreak,
+            lastDailyMissionDay: character.lastDailyMissionDay
           };
         });
         fs.writeFileSync(DATA_FILE, JSON.stringify(out, null, 2));

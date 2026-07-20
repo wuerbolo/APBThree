@@ -8,6 +8,11 @@ export class CharacterModel {
     this.weapons = ['pistol'];
     this.cosmetics = [];          // owned cosmetic ids
     this.equippedCosmetic = null; // currently worn, or null
+
+    // Daily comeback loop (all day keys are UTC YYYY-MM-DD):
+    this.lastLoginDay = null;        // last day the login bonus was claimed
+    this.loginStreak = 0;            // consecutive login days
+    this.lastDailyMissionDay = null; // last day the daily mission was completed
   }
 
   hasWeapon(weaponId) {
@@ -45,6 +50,7 @@ export class CharacterModel {
       weapons: this.weapons,
       cosmetics: this.cosmetics,
       equippedCosmetic: this.equippedCosmetic,
+      loginStreak: this.loginStreak,
       reputationForNextLevel: this.getReputationForLevel(this.level + 1)
     };
   }
@@ -59,5 +65,8 @@ export class CharacterModel {
     if (Array.isArray(data.weapons)) this.weapons = data.weapons;
     if (Array.isArray(data.cosmetics)) this.cosmetics = data.cosmetics;
     if (data.equippedCosmetic !== undefined) this.equippedCosmetic = data.equippedCosmetic;
+    if (data.lastLoginDay !== undefined) this.lastLoginDay = data.lastLoginDay;
+    if (data.loginStreak !== undefined) this.loginStreak = data.loginStreak;
+    if (data.lastDailyMissionDay !== undefined) this.lastDailyMissionDay = data.lastDailyMissionDay;
   }
 } 
