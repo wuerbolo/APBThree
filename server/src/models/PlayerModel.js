@@ -7,7 +7,8 @@ export class PlayerModel {
     this.character = null; // Will hold character data
 
     // WANTED system (session-scoped, not persisted): stars from killing
-    // Civilians; decays over time, cleared on death/arrest.
+    // Civilians; decays over time, cleared on respawn/arrest (see
+    // clearWanted() call sites in NetworkSystem).
     this.wantedStars = 0;
     this.lastWantedAt = 0;
 

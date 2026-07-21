@@ -1110,6 +1110,10 @@ export class NetworkSystem {
           player.health = 100;
           player.isAlive = true;
           player.updatePosition(position);
+          // A fresh spawn is a clean slate -- despite the (previously
+          // untrue) comment on PlayerModel.wantedStars claiming this
+          // already happened, nothing actually cleared it here before.
+          this.clearWanted(socket.id);
 
           // Broadcast respawn to all clients
           this.io.emit('playerRespawned', {
@@ -1353,6 +1357,12 @@ export class NetworkSystem {
     if (!targetPlayer.isAlive) {
       console.log(`Player ${targetId} was killed by NPC ${npcId}!`);
       this.applyDeathPenalty(targetId, targetPlayer);
+      // The player-vs-player kill path clears WANTED on death; dying to an
+      // NPC (the far more common way a wanted chase actually ends, since
+      // NPC Enforcers hunt wanted players from 2x range) has to too, or
+      // the stars stick around server-side long past the death that
+      // should have resolved them.
+      this.clearWanted(targetId);
     }
   }
 
