@@ -114,6 +114,9 @@ export class GameScene {
 
     this.renderer = new THREE.WebGLRenderer();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    // Identifies this canvas for index.html's full-viewport CSS rule, so
+    // it doesn't also stretch other canvases (e.g. the WANTED poster).
+    this.renderer.domElement.id = 'game-canvas';
     document.body.appendChild(this.renderer.domElement);
   }
 

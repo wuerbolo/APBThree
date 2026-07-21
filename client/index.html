@@ -9,7 +9,10 @@
         margin: 0;
         overflow: hidden;
       }
-      canvas {
+      /* Scoped to the game's own canvas -- a bare `canvas` selector here
+         used to stretch every canvas on the page to full-viewport size,
+         including the WANTED poster's (see HUD.showWantedPoster()). */
+      #game-canvas {
         width: 100vw;
         height: 100vh;
         display: block;
