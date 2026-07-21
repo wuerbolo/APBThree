@@ -1,4 +1,4 @@
-import { resolveBuildingCollision, resolveEntityCollision, WORLD_HALF, WORLD_SIZE } from '../utils/collision.js';
+import { resolveBuildingCollision, resolveEntityCollision, hasLineOfSight, WORLD_HALF, WORLD_SIZE } from '../utils/collision.js';
 
 // 60% Civilian, 20% Criminal, 20% Enforcer.
 export function randomNPCFaction() {
@@ -127,6 +127,10 @@ export class NPCModel {
     const consider = (candidate, type) => {
       if (candidate.id === this.id) return;
       if (candidate.faction !== opposingFaction) return;
+      // Don't lock onto (and walk straight into) a target standing on
+      // the other side of a wall -- see hasLineOfSight() for why this
+      // was the root cause of NPCs freezing mid-chase against buildings.
+      if (!hasLineOfSight(this.position, candidate.position)) return;
       const dx = candidate.position.x - this.position.x;
       const dz = candidate.position.z - this.position.z;
       let dist = Math.sqrt(dx * dx + dz * dz);
